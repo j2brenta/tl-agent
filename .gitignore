@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+
+# uv
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Runtime / data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+traces/
+.tl_agent/
+
+# Secrets / env
+.env
+.env.local
+*.pem
+
+# Docker / compose runtime
+infra/data/
+infra/mattermost/data/
+infra/gitlab/data/
+infra/jira_mock/data/
+
+# Mattermost snapshot artefacts
+infra/mattermost/fixtures/*.dump
+
+# Eval artefacts
+evals/reports/*.md
+evals/reports/*.json
+!evals/reports/.gitkeep
+
+# Local Claude state (per-user)
+.claude/local/
