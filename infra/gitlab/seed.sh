@@ -31,10 +31,17 @@ if ! curl_api "${GITLAB_URL}/api/v4/projects?search=demo" | grep -q "\"path_with
         -d "name=demo&namespace_id=${GROUP_ID}&visibility=private"
 fi
 
-# 3. Commit timeline driven by commits.yaml
+# 3. Commit timeline driven by commits.yaml.
+# Invoke via `uv run` so httpx + pyyaml resolve from the project venv —
+# bare `python3` on the host doesn't have either.
 if [ -f "$(dirname "$0")/commits.yaml" ]; then
     echo "==> applying commits.yaml (idempotent)"
-    python3 "$(dirname "$0")/apply_commits.py" --project "${PROJECT}" --gitlab-url "${GITLAB_URL}" --token "${TOKEN}"
+    SCRIPT="$(cd "$(dirname "$0")" && pwd)/apply_commits.py"
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$(dirname "$0")/../.." && pwd)"
+    (cd "$REPO_ROOT" && uv run python "$SCRIPT" \
+        --project "${PROJECT}" \
+        --gitlab-url "${GITLAB_URL}" \
+        --token "${TOKEN}")
 fi
 
 echo "==> gitlab seed complete"
