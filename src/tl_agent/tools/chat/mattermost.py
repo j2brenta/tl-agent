@@ -47,6 +47,19 @@ def _client() -> httpx.AsyncClient:
     s = get_settings()
     cached = cached_token()
     token = cached.access_token if cached is not None else s.mattermost_token
+    if not token:
+        # httpx would otherwise raise `Illegal header value b'Bearer '`.
+        # Surface a typed ToolException so the orchestrator records it as
+        # a clean phase-1 note instead of a transport crash.
+        from tl_agent.tools.base import ToolErrorKind, ToolException
+
+        raise ToolException(
+            kind=ToolErrorKind.UNAUTHORIZED,
+            message=(
+                "mattermost: no token configured. Set TLA_MATTERMOST_TOKEN "
+                "(see services/mattermost_seed/seed.py output) and re-run."
+            ),
+        )
     return http_client(
         base_url=s.mattermost_url,
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},

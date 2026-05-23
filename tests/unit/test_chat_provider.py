@@ -135,6 +135,7 @@ async def test_post_dm_tool_goes_through_mattermost(
     httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TLA_CHAT_PROVIDER", "mattermost")
+    monkeypatch.setenv("TLA_MATTERMOST_TOKEN", "test-bot-token")
     register_chat_tools()
     httpx_mock.add_response(url="http://localhost:8065/api/v4/users/me", json={"id": "bot-1"})
     httpx_mock.add_response(
@@ -157,6 +158,7 @@ async def test_get_chat_messages_tool(
     httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TLA_CHAT_PROVIDER", "mattermost")
+    monkeypatch.setenv("TLA_MATTERMOST_TOKEN", "test-bot-token")
     since_dt = datetime(2026, 5, 22, 9, 0, tzinfo=UTC)
     since_ms = int(since_dt.timestamp() * 1000)
     httpx_mock.add_response(
@@ -186,6 +188,31 @@ async def test_get_chat_messages_tool(
     assert isinstance(result, ToolResult)
     assert len(result.value.messages) == 1
     assert result.value.messages[0].text.startswith("today:")
+
+
+# -------------------- empty token guard --------------------
+
+
+async def test_mattermost_empty_token_returns_clean_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No bearer token configured ⇒ ToolError, not httpx 'Illegal header value' crash."""
+    from tl_agent.tools import ToolError, ToolErrorKind
+    from tl_agent.tools.chat import base as chat_base
+
+    monkeypatch.setenv("TLA_CHAT_PROVIDER", "mattermost")
+    monkeypatch.setenv("TLA_MATTERMOST_TOKEN", "")
+    chat_base._TOKEN_STORE.state = None
+    register_chat_tools()
+    result = await GetChatMessagesTool().invoke(
+        {
+            "channel_id": "c",
+            "since": datetime(2026, 5, 22, 9, 0, tzinfo=UTC).isoformat(),
+            "until": datetime(2026, 5, 22, 10, 0, tzinfo=UTC).isoformat(),
+        },
+        run_date_iso="2026-05-22",
+    )
+    assert isinstance(result, ToolError)
+    assert result.kind is ToolErrorKind.UNAUTHORIZED
+    assert "TLA_MATTERMOST_TOKEN" in result.message
 
 
 # -------------------- registration --------------------
