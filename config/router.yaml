@@ -1,0 +1,85 @@
+# Model router: maps (phase, tier) → (provider, model)
+#
+# Edit this file to swap providers per phase. The router.py loader treats
+# unknown keys as errors (Pydantic extra="forbid"), so typos fail loudly.
+#
+# Tiers convention:
+#   cheap     → Haiku-tier for narrow, parallel pattern-match (Phase 2 triage)
+#   balanced  → Sonnet-tier for cross-correlate / response-mode / compose
+#   deep      → Opus-tier for the ReACT deep-dive (Phase 5) and verifier
+
+default_tier: balanced
+
+routes:
+  # named tier defaults — `Router.route('balanced')` resolves to this
+  cheap:
+    provider: anthropic
+    model: claude-haiku-4-5
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: true
+
+  balanced:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_tokens: 2048
+    temperature: 0.0
+    cache_system: true
+
+  deep:
+    provider: anthropic
+    model: claude-opus-4-7
+    max_tokens: 4096
+    temperature: 0.0
+    cache_system: true
+
+  # per-phase overrides — these take precedence
+  phase2_triage:
+    provider: anthropic
+    model: claude-haiku-4-5
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: true
+
+  phase3_correlate:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_tokens: 2048
+    temperature: 0.0
+    cache_system: true
+
+  phase5_deepdive:
+    provider: anthropic
+    model: claude-opus-4-7
+    max_tokens: 4096
+    temperature: 0.0
+    cache_system: true
+
+  phase6_response_mode:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: true
+
+  phase7_compose:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_tokens: 2048
+    temperature: 0.2
+    cache_system: true
+
+  verifier:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_tokens: 1024
+    temperature: 0.0
+    cache_system: false
+
+  # Offline / local fallback — uncomment and flip 'provider' on the routes
+  # above to A/B against a local model during prompt iteration.
+  # local_balanced:
+  #   provider: ollama
+  #   model: llama3.1:70b
+  #   max_tokens: 2048
+  #   temperature: 0.0
