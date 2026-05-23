@@ -33,12 +33,13 @@ fi
 
 # 3. Commit timeline driven by commits.yaml.
 # Invoke via `uv run` so httpx + pyyaml resolve from the project venv —
-# bare `python3` on the host doesn't have either.
+# bare `python3` on the host doesn't have either. Compute repo root from
+# this script's location (script is at infra/gitlab/seed.sh).
 if [ -f "$(dirname "$0")/commits.yaml" ]; then
     echo "==> applying commits.yaml (idempotent)"
-    SCRIPT="$(cd "$(dirname "$0")" && pwd)/apply_commits.py"
-    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$(dirname "$0")/../.." && pwd)"
-    (cd "$REPO_ROOT" && uv run python "$SCRIPT" \
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+    (cd "$REPO_ROOT" && uv run python "${SCRIPT_DIR}/apply_commits.py" \
         --project "${PROJECT}" \
         --gitlab-url "${GITLAB_URL}" \
         --token "${TOKEN}")
