@@ -61,3 +61,6 @@ evals/reports/*.json
 
 # Local Claude state (per-user)
 .claude/local/
+
+# Exported Claude Code conversation transcripts (created by /export)
+*-local-command-caveat*.txt
