@@ -161,9 +161,12 @@ async def test_get_chat_messages_tool(
     monkeypatch.setenv("TLA_MATTERMOST_TOKEN", "test-bot-token")
     since_dt = datetime(2026, 5, 22, 9, 0, tzinfo=UTC)
     since_ms = int(since_dt.timestamp() * 1000)
+    # 26-char alphanumeric — looks like a real Mattermost channel id so the
+    # resolver skips the name lookup.
+    real_channel_id = "zzzz0000aaaaaaaaaaaaaaaaaa"
     httpx_mock.add_response(
         url=httpx.URL(
-            "http://localhost:8065/api/v4/channels/chan-1/posts",
+            f"http://localhost:8065/api/v4/channels/{real_channel_id}/posts",
             params={"since": since_ms, "per_page": 100},
         ),
         json={
@@ -179,7 +182,7 @@ async def test_get_chat_messages_tool(
     )
     result = await GetChatMessagesTool().invoke(
         {
-            "channel_id": "chan-1",
+            "channel_id": real_channel_id,
             "since": since_dt.isoformat(),
             "until": "2026-05-22T10:00:00+00:00",
         },
@@ -188,6 +191,49 @@ async def test_get_chat_messages_tool(
     assert isinstance(result, ToolResult)
     assert len(result.value.messages) == 1
     assert result.value.messages[0].text.startswith("today:")
+
+
+# -------------------- channel name resolution --------------------
+
+
+async def test_get_messages_resolves_channel_name_to_id(
+    httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-26-char input is treated as a name and resolved via /teams/.../channels/name/."""
+    monkeypatch.setenv("TLA_MATTERMOST_TOKEN", "test-bot-token")
+    monkeypatch.setenv("TLA_MATTERMOST_TEAM", "engineering")
+    from tl_agent.tools.chat import mattermost as mm_mod
+
+    mm_mod._CHANNEL_ID_CACHE.clear()
+
+    real_id = "abcdefghijklmnopqrstuvwxyz"  # 26 alphanumeric
+    httpx_mock.add_response(
+        url="http://localhost:8065/api/v4/teams/name/engineering/channels/name/town-square",
+        json={"id": real_id, "name": "town-square"},
+    )
+    since_dt = datetime(2026, 5, 22, 9, 0, tzinfo=UTC)
+    since_ms = int(since_dt.timestamp() * 1000)
+    httpx_mock.add_response(
+        url=httpx.URL(
+            f"http://localhost:8065/api/v4/channels/{real_id}/posts",
+            params={"since": since_ms, "per_page": 100},
+        ),
+        json={"posts": {}},
+    )
+    msgs = await MattermostProvider().get_messages(
+        channel_id="town-square",
+        since=since_dt,
+        until=datetime(2026, 5, 22, 10, 0, tzinfo=UTC),
+    )
+    assert msgs == []
+
+
+def test_looks_like_channel_id() -> None:
+    from tl_agent.tools.chat.mattermost import _looks_like_channel_id
+
+    assert _looks_like_channel_id("abcdefghijklmnopqrstuvwxyz")
+    assert not _looks_like_channel_id("town-square")
+    assert not _looks_like_channel_id("short")
 
 
 # -------------------- empty token guard --------------------

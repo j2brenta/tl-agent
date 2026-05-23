@@ -42,6 +42,29 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_NAME = "mattermost"
 
+# Mattermost IDs are 26 char base32-ish. Anything else is a name we must
+# resolve via the team-scoped endpoint.
+_ID_LENGTH = 26
+_CHANNEL_ID_CACHE: dict[str, str] = {}
+
+
+def _looks_like_channel_id(value: str) -> bool:
+    return len(value) == _ID_LENGTH and value.isalnum()
+
+
+async def _resolve_channel(client: httpx.AsyncClient, channel_id_or_name: str) -> str:
+    """Return the channel ID, resolving a name through the team API if needed."""
+    if _looks_like_channel_id(channel_id_or_name):
+        return channel_id_or_name
+    if channel_id_or_name in _CHANNEL_ID_CACHE:
+        return _CHANNEL_ID_CACHE[channel_id_or_name]
+    team = get_settings().mattermost_team
+    r = await client.get(f"/api/v4/teams/name/{team}/channels/name/{channel_id_or_name}")
+    r.raise_for_status()
+    resolved = str(r.json()["id"])
+    _CHANNEL_ID_CACHE[channel_id_or_name] = resolved
+    return resolved
+
 
 def _client() -> httpx.AsyncClient:
     s = get_settings()
@@ -93,7 +116,8 @@ class MattermostProvider(ChatProvider):
     async def post_channel(self, *, channel_id: str, body: str) -> PostResult:
         async with _client() as client:
             try:
-                return await self._post(client, channel_id, body)
+                resolved_id = await _resolve_channel(client, channel_id)
+                return await self._post(client, resolved_id, body)
             except httpx.HTTPStatusError as exc:
                 raise_from_http_error(exc, tool_label=f"{self.name}.post_channel")
             except httpx.HTTPError as exc:
@@ -120,14 +144,15 @@ class MattermostProvider(ChatProvider):
         params = {"since": int(since.timestamp() * 1000), "per_page": limit}
         async with _client() as client:
             try:
-                r = await client.get(f"/api/v4/channels/{channel_id}/posts", params=params)
+                resolved_id = await _resolve_channel(client, channel_id)
+                r = await client.get(f"/api/v4/channels/{resolved_id}/posts", params=params)
                 r.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 raise_from_http_error(exc, tool_label=f"{self.name}.get_messages")
             except httpx.HTTPError as exc:
                 raise_from_transport_error(exc, tool_label=f"{self.name}.get_messages")
         data = r.json()
-        return [_to_message(p, channel_id) for p in (data.get("posts") or {}).values()]
+        return [_to_message(p, resolved_id) for p in (data.get("posts") or {}).values()]
 
     async def get_message(self, *, channel_id: str, message_id: str) -> ChatMessage | None:
         async with _client() as client:

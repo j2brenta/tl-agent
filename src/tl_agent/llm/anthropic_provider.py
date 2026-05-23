@@ -49,6 +49,15 @@ PRICING: dict[str, tuple[float, float, float, float]] = {
     "claude-haiku-4-5": (0.80, 4.00, 0.08, 1.00),
 }
 
+# Claude 4.x models reject the `temperature` parameter — the API returns
+# "temperature is deprecated for this model". Prefix-match so future
+# 4.x point releases are picked up automatically.
+_TEMPERATURE_REJECTING_PREFIXES = ("claude-opus-4", "claude-sonnet-4", "claude-haiku-4")
+
+
+def _model_rejects_temperature(model: str) -> bool:
+    return any(model.startswith(p) for p in _TEMPERATURE_REJECTING_PREFIXES)
+
 
 def _price(model: str, usage_dict: dict[str, int]) -> float:
     pricing = PRICING.get(model)
@@ -82,20 +91,26 @@ class AnthropicProvider(Provider):
         system_param = _system_param(req.system, cache=req.cache_system)
         tools_param: list[dict[str, Any]] = list(req.tools) if req.tools else []
 
+        # Claude 4.x models reject the `temperature` parameter ("temperature
+        # is deprecated for this model"). Skip it for those; older models
+        # still accept it. Falls back to the model's natural default.
+        kwargs: dict[str, Any] = {
+            "model": req.model,
+            "messages": anth_messages,
+            "system": system_param,
+            "max_tokens": req.max_tokens,
+            "tools": cast(Any, tools_param) if tools_param else cast(Any, []),
+            "tool_choice": cast(Any, {"type": req.tool_choice})
+            if tools_param
+            else cast(Any, {"type": "auto"}),
+        }
+        if not _model_rejects_temperature(req.model):
+            kwargs["temperature"] = req.temperature
+
         with llm_span(req.model, phase=req.phase):
             start = time.perf_counter()
             try:
-                msg = await self._client.messages.create(
-                    model=req.model,
-                    messages=anth_messages,
-                    system=system_param,
-                    max_tokens=req.max_tokens,
-                    temperature=req.temperature,
-                    tools=cast(Any, tools_param) if tools_param else cast(Any, []),
-                    tool_choice=cast(Any, {"type": req.tool_choice})
-                    if tools_param
-                    else cast(Any, {"type": "auto"}),
-                )
+                msg = await self._client.messages.create(**kwargs)
             except APIStatusError as exc:
                 raise ProviderError(
                     f"anthropic API error: {exc.status_code} {exc.message}",
