@@ -121,6 +121,9 @@ typeCheckingMode = "strict"
 reportMissingTypeStubs = "warning"
 reportUnknownMemberType = "warning"
 reportUnknownArgumentType = "warning"
+# typer.Option / typer.Argument are overload-based and stubs report Any —
+# warn-not-error to keep our own gaps visible without third-party noise.
+reportUnknownVariableType = "warning"
 
 # -------------------- pytest --------------------
 [tool.pytest.ini_options]
