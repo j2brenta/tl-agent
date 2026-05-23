@@ -1,0 +1,15 @@
+{% extends "_base.html" %}
+{% block title %}Brief — {{ today }}{% endblock %}
+
+{% block body %}
+<h1>Brief — {{ today }}</h1>
+<p><em>{{ pending|length }} pending decisions</em></p>
+
+{% if not pending %}
+  <p>Nothing to review. Run <code>tl-agent run</code> to generate today's brief.</p>
+{% endif %}
+
+{% for d in pending %}
+  {% include "_decision_card.html" %}
+{% endfor %}
+{% endblock %}

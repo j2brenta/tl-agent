@@ -1,0 +1,22 @@
+{% extends "_base.html" %}
+{% block title %}Audit log{% endblock %}
+
+{% block body %}
+<h1>Audit log</h1>
+<table>
+  <thead>
+    <tr><th>created</th><th>hotspot</th><th>mode</th><th>action</th><th>sent</th></tr>
+  </thead>
+  <tbody>
+    {% for d in decisions %}
+    <tr>
+      <td>{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td><code>{{ d.hotspot_id }}</code></td>
+      <td>{{ d.proposed_mode.value }}</td>
+      <td>{{ d.tl_action.value if d.tl_action else "-" }}</td>
+      <td>{{ (d.sent_provider + ":" + d.sent_message_id[:12]) if d.sent_message_id else "-" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,31 @@
+<div id="decision-{{ d.id if d.id is defined else decision.id }}"
+     class="card {% if (d.tl_action.value if d.tl_action else None) == 'approved' or (decision.tl_action.value if decision is defined and decision.tl_action else None) == 'approved' %}approved
+                 {% elif (d.tl_action.value if d.tl_action else None) == 'rejected' or (decision.tl_action.value if decision is defined and decision.tl_action else None) == 'rejected' %}rejected
+                 {% else %}pending{% endif %}">
+  {% set row = d if d is defined else decision %}
+  <div>
+    <span class="mode">{{ row.proposed_mode.value }}</span>
+    <strong>{{ row.hotspot_id }}</strong>
+    <small>· created {{ row.created_at.strftime("%H:%M") }}</small>
+  </div>
+  <div class="body">{{ row.final_body or row.proposed_body }}</div>
+
+  {% if not row.tl_action %}
+  <form hx-post="/decisions/{{ row.id }}/approve" hx-target="#decision-{{ row.id }}" hx-swap="outerHTML">
+    <button type="submit">approve</button>
+  </form>
+  <form hx-post="/decisions/{{ row.id }}/reject"  hx-target="#decision-{{ row.id }}" hx-swap="outerHTML">
+    <button type="submit">reject</button>
+  </form>
+  <form hx-post="/decisions/{{ row.id }}/edit"    hx-target="#decision-{{ row.id }}" hx-swap="outerHTML">
+    <details>
+      <summary>edit</summary>
+      <textarea name="body" rows="4" cols="80">{{ row.proposed_body }}</textarea><br>
+      <button type="submit">approve edited</button>
+    </details>
+  </form>
+  {% else %}
+  <em>{{ row.tl_action.value }} @ {{ row.tl_acted_at.strftime("%H:%M") if row.tl_acted_at else "" }}
+     {% if row.sent_message_id %}· sent {{ row.sent_provider }}/{{ row.sent_message_id[:12] }}{% endif %}</em>
+  {% endif %}
+</div>
