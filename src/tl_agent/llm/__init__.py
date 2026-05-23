@@ -15,6 +15,7 @@ from tl_agent.llm.base import (
 )
 from tl_agent.llm.budget import BudgetExceeded, BudgetTracker
 from tl_agent.llm.ollama_provider import OllamaProvider
+from tl_agent.llm.prompts import Prompt, PromptsConfig, load_prompt, load_prompts_config
 from tl_agent.llm.router import ModelRoute, Router, RouterConfig, build_default
 
 __all__ = [
@@ -27,6 +28,8 @@ __all__ = [
     "MessageRole",
     "ModelRoute",
     "OllamaProvider",
+    "Prompt",
+    "PromptsConfig",
     "Provider",
     "ProviderError",
     "Router",
@@ -36,4 +39,6 @@ __all__ = [
     "ToolResultBlock",
     "ToolUseBlock",
     "build_default",
+    "load_prompt",
+    "load_prompts_config",
 ]
