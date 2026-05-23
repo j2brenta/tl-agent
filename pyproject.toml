@@ -107,7 +107,9 @@ check_untyped_defs = true
 show_error_codes = true
 pretty = true
 plugins = ["pydantic.mypy"]
-files = ["src", "services", "evals", "mcp"]
+# mcp/ is excluded: the `mcp` SDK is an optional extra dep, so its types
+# aren't always available at check time. The module guards imports at runtime.
+files = ["src", "services", "evals"]
 
 [[tool.mypy.overrides]]
 module = ["mattermostdriver.*", "slack_sdk.*"]
@@ -115,8 +117,8 @@ ignore_missing_imports = true
 
 # -------------------- pyright --------------------
 [tool.pyright]
-include = ["src", "services", "evals", "mcp"]
-exclude = ["**/node_modules", "**/__pycache__", "**/.venv", "tests"]
+include = ["src", "services", "evals"]
+exclude = ["**/node_modules", "**/__pycache__", "**/.venv", "tests", "mcp"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = "warning"
