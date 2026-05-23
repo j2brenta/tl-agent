@@ -1,0 +1,14 @@
+id: 20_idempotency_double_send
+title: Re-approving the same decision does NOT double-send the DM
+description: |
+  The TL approves a DM. The Phase 8 executor sends it (mock Mattermost
+  records 1 message). The TL then re-approves the same decision (e.g.
+  refreshes the page). Idempotency cache MUST short-circuit; Mattermost
+  must still have exactly 1 message.
+suite: [full]
+run_date: "2026-05-22"
+failure_kind: idempotency_violation
+expected:
+  # Two approval calls, one delivered message — checked by the runner's
+  # live integration path against the mock.
+  min_decisions: 1

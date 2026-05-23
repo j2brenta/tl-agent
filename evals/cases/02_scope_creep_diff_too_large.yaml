@@ -1,0 +1,15 @@
+id: 02_scope_creep_diff_too_large
+title: Scope creep flagged when diff vastly exceeds estimate
+description: |
+  Matt's ENG-9 is estimated at 2 points but his commit lands 540 additions
+  across 12 files. The agent should flag SCOPE_CREEP and cite the commit SHA.
+suite: [quick, full]
+run_date: "2026-05-22"
+failure_kind: missed_hotspot
+expected:
+  min_decisions: 1
+  expected_hotspot_summaries:
+    - "matt"
+    - "ENG-9"
+  expected_modes:
+    "1": "dm"

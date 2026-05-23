@@ -1,0 +1,24 @@
+id: 06_escalation_after_five_days
+title: ESCALATE chosen when days_hot >= 5
+description: |
+  A flag was open for 5 days. Phase 6's heuristic + the escalation rules
+  should pick ESCALATE; the body should follow the 3-bullet manager-note
+  format from tl_preferences.md.
+suite: [full]
+run_date: "2026-05-22"
+failure_kind: escalation_miss
+seed_state:
+  preseed_flags:
+    - id: "flag-individual-john-ENG-12"
+      type: "individual"
+      title: "ENG-12 stuck"
+      engineer_id: "john"
+      status: "red"
+      days_hot: 5
+      first_seen: "2026-05-17"
+      last_seen: "2026-05-21"
+      related_ticket_ids: ["ENG-12"]
+expected:
+  min_decisions: 1
+  expected_modes:
+    "1": "escalate"

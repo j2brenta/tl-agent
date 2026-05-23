@@ -1,0 +1,26 @@
+id: 05_carry_forward_days_hot
+title: days_hot increments when a flag survives reconciliation
+description: |
+  A flag was open yesterday for "ENG-12 stuck (john)" with days_hot=2.
+  Today's run sees the same flag — Phase 4 should bump days_hot=3 and
+  Phase 6 should pick DM (not NOTE).
+suite: [quick, full]
+run_date: "2026-05-22"
+failure_kind: response_mode_mismatch
+seed_state:
+  preseed_flags:
+    - id: "flag-individual-john-ENG-12"
+      type: "individual"
+      title: "ENG-12 stuck"
+      engineer_id: "john"
+      status: "yellow"
+      days_hot: 2
+      first_seen: "2026-05-20"
+      last_seen: "2026-05-21"
+      related_ticket_ids: ["ENG-12"]
+expected:
+  min_decisions: 1
+  expected_hotspot_summaries:
+    - "ENG-12"
+  expected_modes:
+    "1": "dm"

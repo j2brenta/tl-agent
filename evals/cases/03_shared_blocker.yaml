@@ -1,0 +1,14 @@
+id: 03_shared_blocker
+title: Shared blocker — two engineers reference the same dependency
+description: |
+  John has cited "waiting on ENG-9" two days in a row; ENG-9 is matt's
+  in-progress ticket. The agent should surface ONE shared-blocker hot spot
+  with both engineers, not two individual hot spots.
+suite: [quick, full]
+run_date: "2026-05-22"
+failure_kind: false_positive
+expected:
+  min_decisions: 1
+  max_decisions: 3
+  expected_hotspot_summaries:
+    - "ENG-9"

@@ -1,0 +1,15 @@
+id: 04_off_sprint_work
+title: Off-sprint commit (PAY-99) detected and DM-suggested
+description: |
+  Karen committed PAY-99 changes without a sprint ticket and only mentioned
+  it in passing. The agent should suggest a DM asking what's going on.
+suite: [quick, full]
+run_date: "2026-05-22"
+failure_kind: response_mode_mismatch
+expected:
+  min_decisions: 1
+  expected_hotspot_summaries:
+    - "karen"
+    - "PAY-99"
+  expected_modes:
+    "1": "dm"

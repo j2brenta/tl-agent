@@ -1,0 +1,18 @@
+id: 01_quiet_engineer
+title: Quiet engineer detected as YELLOW
+description: |
+  John has been verbose in standups for the past 2 weeks. Today his standup
+  is one line. The agent should flag him YELLOW citing the baseline gap.
+suite: [quick, full]
+run_date: "2026-05-22"
+failure_kind: missed_hotspot
+seed_state:
+  jira_fixture: null
+  standups_fixture: null
+expected:
+  min_decisions: 1
+  expected_hotspot_summaries:
+    - "john"
+  expected_modes:
+    "1": "note"
+  max_open_flags: 5
