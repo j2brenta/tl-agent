@@ -1,0 +1,141 @@
+# tl-agent — local dev compose.
+#
+# Services:
+#   gitlab          — real GitLab CE for commit + project APIs
+#   mattermost      — real Mattermost server (primary ChatProvider)
+#   mattermost-db   — postgres backing Mattermost (snapshot/restore target)
+#   jira_mock       — FastAPI Jira REST subset (we own the seeds)
+#   phoenix         — Arize Phoenix UI for OTel traces
+#   ollama          — optional local LLM (under the `local` profile)
+#
+# Conventions:
+#   - Every long-lived service has a healthcheck.
+#   - Volumes named with `tla_` prefix for grep-ability.
+#   - Ports stable: GitLab 8929, Mattermost 8065, Phoenix 6006, jira_mock 9100.
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:17.5.0-ce.0
+    container_name: tla-gitlab
+    restart: unless-stopped
+    hostname: gitlab.local
+    ports:
+      - "8929:8929"
+      - "2289:22"
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab.local:8929'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2289
+        prometheus_monitoring['enable'] = false
+        gitlab_rails['gitlab_default_can_create_group'] = false
+        gitlab_rails['gitlab_signup_enabled'] = false
+    volumes:
+      - tla_gitlab_config:/etc/gitlab
+      - tla_gitlab_logs:/var/log/gitlab
+      - tla_gitlab_data:/var/opt/gitlab
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8929/-/readiness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+
+  mattermost-db:
+    image: postgres:16-alpine
+    container_name: tla-mm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: mmpw
+      POSTGRES_DB: mattermost
+    volumes:
+      - tla_mm_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmuser -d mattermost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mattermost:
+    image: mattermost/mattermost-team-edition:10.1.2
+    container_name: tla-mattermost
+    restart: unless-stopped
+    depends_on:
+      mattermost-db:
+        condition: service_healthy
+    environment:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: "postgres://mmuser:mmpw@mattermost-db:5432/mattermost?sslmode=disable&connect_timeout=10"
+      MM_BLEVESETTINGS_INDEXDIR: /mattermost/bleve-indexes
+      MM_SERVICESETTINGS_SITEURL: "http://localhost:8065"
+      MM_SERVICESETTINGS_ENABLELOCALMODE: "true"
+      MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION: "/var/tmp/mattermost_local.socket"
+    ports:
+      - "8065:8065"
+    volumes:
+      - tla_mm_data:/mattermost/data
+      - tla_mm_logs:/mattermost/logs
+      - tla_mm_config:/mattermost/config
+      - tla_mm_plugins:/mattermost/plugins
+      - tla_mm_client_plugins:/mattermost/client/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8065/api/v4/system/ping || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  jira_mock:
+    build:
+      context: ../services/jira_mock
+    container_name: tla-jira-mock
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    environment:
+      JIRA_MOCK_PORT: "9100"
+    volumes:
+      - ../services/jira_mock:/app
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9100/rest/api/3/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  phoenix:
+    image: arizephoenix/phoenix:version-7.0.0
+    container_name: tla-phoenix
+    restart: unless-stopped
+    ports:
+      - "6006:6006"  # UI
+      - "4317:4317"  # OTLP gRPC
+    environment:
+      PHOENIX_PORT: "6006"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:6006/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: tla-ollama
+    profiles: ["local"]  # only started via `--profile local`
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - tla_ollama:/root/.ollama
+
+volumes:
+  tla_gitlab_config: {}
+  tla_gitlab_logs: {}
+  tla_gitlab_data: {}
+  tla_mm_db: {}
+  tla_mm_data: {}
+  tla_mm_logs: {}
+  tla_mm_config: {}
+  tla_mm_plugins: {}
+  tla_mm_client_plugins: {}
+  tla_ollama: {}

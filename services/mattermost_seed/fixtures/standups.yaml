@@ -1,0 +1,74 @@
+# Deterministic standup history for the four engineers.
+# Designed so the agent surfaces specific hot spots (used by eval cases).
+
+standups:
+  # ---------- Day -2 ----------
+  - engineer: john
+    date: "2026-05-20"
+    message: |
+      Yesterday: rate limiter for ENG-1.
+      Today: pick up ENG-12 (publisher retry).
+      Blockers: none.
+
+  - engineer: matt
+    date: "2026-05-20"
+    message: "Working on ENG-9 (auth events). On track."
+
+  - engineer: alicia
+    date: "2026-05-20"
+    message: |
+      Y: ENG-4 chart spike.
+      T: continue ENG-4.
+      Risks: none.
+
+  - engineer: karen
+    date: "2026-05-20"
+    message: "Y: ENG-5 consumer wiring. T: keep going. No blockers."
+
+  # ---------- Day -1 ----------
+  - engineer: john
+    date: "2026-05-21"
+    message: |
+      Y: started ENG-12, found edge case in the retry semantics.
+      T: try to push through ENG-12.
+      Blockers: ENG-9 not done — I need its event stream.
+
+  - engineer: matt
+    date: "2026-05-21"
+    message: |
+      Y: ENG-9 still in progress, looking into the migration.
+      T: trying to wrap ENG-9 today.
+
+  - engineer: alicia
+    date: "2026-05-21"
+    message: |
+      Y: ENG-4 charts done; cleaned up.
+      T: pick up ENG-22 review.
+      Risks: none.
+
+  - engineer: karen
+    date: "2026-05-21"
+    message: "Y: ENG-5. T: same. No blockers."
+
+  # ---------- Today (-0) ----------
+  - engineer: john
+    date: "2026-05-22"
+    message: |
+      Y: still on ENG-12. Hit a snag with the retry semantics.
+      T: trying to wrap it.
+      Blockers: still waiting on ENG-9.
+
+  - engineer: matt
+    date: "2026-05-22"
+    message: "Pushing ENG-9. Bigger than expected. Looking into the migration."
+
+  - engineer: alicia
+    date: "2026-05-22"
+    message: |
+      Y: ENG-22 review.
+      T: ENG-7 filters.
+      Risks: none.
+
+  - engineer: karen
+    date: "2026-05-22"
+    message: "Y: ENG-5 + a small PAY-99 tidy in ingestion. T: ENG-10 next."

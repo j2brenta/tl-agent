@@ -1,0 +1,62 @@
+# Scripted commit timeline for the demo project.
+#
+# Each entry produces one commit. Engineering scenarios are intentional —
+# the eval cases assert on hot spots derived from these signals.
+
+commits:
+  - sha: a1b2c3d
+    author: john@example.local
+    branch: feat/eng-1
+    at: "2026-05-20T09:15:00+00:00"
+    message: "ENG-1 wire rate limiter; first pass"
+    files: 3
+    additions: 64
+    deletions: 8
+
+  - sha: a1b2c3e
+    author: john@example.local
+    branch: feat/eng-12
+    at: "2026-05-21T11:30:00+00:00"
+    message: "ENG-12 wip publisher retry"
+    files: 2
+    additions: 22
+    deletions: 4
+
+  - sha: a1b2c3f
+    author: john@example.local
+    branch: feat/eng-12
+    at: "2026-05-22T10:00:00+00:00"
+    message: "ENG-12 still wrestling with retry semantics"
+    files: 1
+    additions: 12
+    deletions: 6
+
+  # Karen: off-sprint commit (PAY-* isn't a sprint ticket)
+  - sha: b2c3d4e
+    author: karen@example.local
+    branch: misc
+    at: "2026-05-22T11:00:00+00:00"
+    message: "PAY-99 quick logging tidy in ingestion"
+    files: 5
+    additions: 88
+    deletions: 12
+
+  # Matt: scope creep — diff size vastly over the 2-point estimate
+  - sha: c3d4e5f
+    author: matt@example.local
+    branch: feat/eng-9
+    at: "2026-05-22T08:30:00+00:00"
+    message: "ENG-9 events stream + tests + migration"
+    files: 12
+    additions: 540
+    deletions: 35
+
+  # Alicia: normal commit
+  - sha: d4e5f60
+    author: alicia@example.local
+    branch: feat/eng-4
+    at: "2026-05-22T09:45:00+00:00"
+    message: "ENG-4 chart refresh on socket events"
+    files: 4
+    additions: 110
+    deletions: 22
