@@ -34,6 +34,7 @@ dependencies = [
     # mattermost / slack
     "mattermostdriver>=7.3",
     "slack-sdk>=3.31",
+    "aiohttp>=3.10",  # required by slack-sdk's AsyncWebClient
 ]
 
 [project.scripts]
