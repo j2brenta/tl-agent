@@ -7,8 +7,18 @@
 
 set -euo pipefail
 
-GITLAB_URL="${GITLAB_URL:-http://localhost:8929}"
-TOKEN="${GITLAB_ADMIN_TOKEN:-dev-token}"
+# Load .env if present (same source of truth as the Python app).
+REPO_ROOT_FOR_ENV="$(cd "$(dirname "$0")/../.." && pwd)"
+if [ -f "${REPO_ROOT_FOR_ENV}/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT_FOR_ENV}/.env"
+    set +a
+fi
+
+GITLAB_URL="${TLA_GITLAB_BASE_URL:-${GITLAB_URL:-http://localhost:8929}}"
+# Prefer the seed-time admin token; fall back to the runtime token; then to a literal default.
+TOKEN="${TLA_GITLAB_ADMIN_TOKEN:-${TLA_GITLAB_TOKEN:-${GITLAB_ADMIN_TOKEN:-dev-token}}}"
 PROJECT="${PROJECT:-tl-agent/demo}"
 NAMESPACE="${NAMESPACE:-tl-agent}"
 

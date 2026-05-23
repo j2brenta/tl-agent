@@ -19,13 +19,19 @@ from typing import Any
 
 import httpx
 import yaml
+from dotenv import load_dotenv
 
-URL = os.environ.get("MATTERMOST_URL", "http://localhost:8065")
-ADMIN_USER = os.environ.get("MM_ADMIN_USER", "tl-admin")
-ADMIN_EMAIL = os.environ.get("MM_ADMIN_EMAIL", "tl-admin@example.local")
-ADMIN_PW = os.environ.get("MM_ADMIN_PW", "Tl-AdminPw1!")
-TEAM = os.environ.get("MM_TEAM", "engineering")
-STANDUP_CHANNEL = os.environ.get("MM_STANDUP_CHANNEL", "town-square")
+# Load .env from the repo root so this script reads the same source of truth
+# as the Python app + the bash seed scripts. Idempotent + safe if missing.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_REPO_ROOT / ".env", override=False)
+
+URL = os.environ.get("TLA_MATTERMOST_URL", "http://localhost:8065")
+ADMIN_USER = os.environ.get("TLA_MATTERMOST_ADMIN_USER", "tl-admin")
+ADMIN_EMAIL = os.environ.get("TLA_MATTERMOST_ADMIN_EMAIL", "tl-admin@example.local")
+ADMIN_PW = os.environ.get("TLA_MATTERMOST_ADMIN_PW", "Tl-AdminPw1!")
+TEAM = os.environ.get("TLA_MATTERMOST_TEAM", "engineering")
+STANDUP_CHANNEL = os.environ.get("TLA_MATTERMOST_STANDUP_CHANNEL", "town-square")
 ENGINEERS = ["john", "matt", "alicia", "karen"]
 
 

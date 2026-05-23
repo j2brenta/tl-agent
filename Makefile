@@ -17,6 +17,14 @@ help: ## Show available targets
 install: ## uv sync (dev + mcp extras)
 	uv sync --all-extras
 
+.PHONY: env
+env: ## scaffold .env from .env.example (idempotent — never overwrites)
+	@if [ -f .env ]; then \
+		echo ".env already exists — leaving it alone"; \
+	else \
+		cp .env.example .env && echo "wrote .env — edit it with your tokens"; \
+	fi
+
 .PHONY: lock
 lock: ## refresh uv.lock
 	uv lock

@@ -1,6 +1,10 @@
 """Application settings.
 
-Loaded fresh on every run; reads `.env` if present plus environment overrides.
+Loaded fresh on every run. The single source of truth for tokens / URLs is
+`<repo-root>/.env` (see `.env.example`); environment variables of the same
+name override the file. Every variable is prefixed `TLA_` to keep the global
+namespace tidy.
+
 LAYER 1 (markdown config) is loaded by `storage.markdown_loader`, not here.
 """
 
@@ -13,13 +17,14 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = REPO_ROOT / ".env"
 
 
 class Settings(BaseSettings):
     """Runtime configuration for tl-agent."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         env_prefix="TLA_",
         extra="ignore",
@@ -56,6 +61,15 @@ class Settings(BaseSettings):
     jira_token: str = Field(default="dev-token")
     gitlab_base_url: str = Field(default="http://localhost:8929")
     gitlab_token: str = Field(default="dev-token")
+    # Seed-time admin token (Personal Access Token with `api` scope). Used
+    # by infra/gitlab/seed.sh. If unset, falls back to gitlab_token.
+    gitlab_admin_token: str = Field(default="")
+
+    # Seed-time Mattermost admin (used by services/mattermost_seed/seed.py
+    # on first boot to create the admin user + bot accounts).
+    mattermost_admin_user: str = Field(default="tl-admin")
+    mattermost_admin_email: str = Field(default="tl-admin@example.local")
+    mattermost_admin_pw: str = Field(default="Tl-AdminPw1!")
 
     # phase 5 ReACT budgets
     react_max_steps: int = 12
