@@ -17,7 +17,7 @@
 set -euo pipefail
 
 # ---------- args ----------
-DEMO_DATE="${DEMO_DATE:-2026-05-26}"
+DEMO_DATE="${DEMO_DATE:-2026-05-25}"
 DO_RESET=0
 for arg in "$@"; do
   case "$arg" in
@@ -75,8 +75,6 @@ if [ "$DO_RESET" = 1 ]; then
   say "wiping SQLite state (--reset)"
   uv run python -m tl_agent.cli reset --confirm
   ok "state reset"
-  say "clearing Mattermost town-square posts"
-  make clean-mattermost
 fi
 
 # ---------- 3. seed everything ----------
@@ -115,6 +113,10 @@ COMMIT_ANCHOR_DATE="$DEMO_DATE" bash infra/gitlab/seed.sh
 ok "commits refreshed"
 
 # ---------- 4. post the demo standup as tl-admin ----------
+# Always clear old standup posts so re-runs don't accumulate messages.
+say "clearing Mattermost town-square posts"
+make clean-mattermost
+
 say "posting bulk standup for $DEMO_DATE as tl-admin"
 read -r -d '' STANDUP_BODY <<EOF || true
 Standup $DEMO_DATE

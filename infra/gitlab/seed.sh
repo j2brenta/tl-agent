@@ -26,6 +26,37 @@ curl_api() {
     curl -fsS -H "PRIVATE-TOKEN: ${TOKEN}" "$@"
 }
 
+# Ensure TOKEN is a working GitLab PAT.  When .env still has the placeholder
+# value (or the token has expired / been revoked), provision a fresh one via
+# the Rails runner and persist it to .env so future runs don't need to repeat
+# this step.
+_ensure_gitlab_token() {
+    if curl -fsS -H "PRIVATE-TOKEN: ${TOKEN}" "${GITLAB_URL}/api/v4/version" >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "==> GitLab token invalid — provisioning PAT via rails runner (first-run only)"
+    NEW_TOKEN="$(docker exec tla-gitlab gitlab-rails runner \
+        "u = User.find_by_username('root'); \
+         u.personal_access_tokens.where(name: 'tl-agent-seed').each(&:revoke!); \
+         t = u.personal_access_tokens.create!(name: 'tl-agent-seed', scopes: ['api'], expires_at: 1.year.from_now); \
+         puts t.token" 2>/dev/null | grep -E '^glpat-' | tail -n1 | tr -d '[:space:]')"
+    if [ -z "$NEW_TOKEN" ]; then
+        echo "ERROR: could not provision GitLab token — is tla-gitlab healthy?" >&2
+        exit 1
+    fi
+    TOKEN="$NEW_TOKEN"
+    ENV_FILE="${REPO_ROOT_FOR_ENV}/.env"
+    for var in TLA_GITLAB_ADMIN_TOKEN TLA_GITLAB_TOKEN; do
+        if grep -qE "^${var}=" "$ENV_FILE"; then
+            sed -i.bak -E "s|^${var}=.*|${var}=${TOKEN}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+        else
+            printf '\n%s=%s\n' "$var" "$TOKEN" >> "$ENV_FILE"
+        fi
+    done
+    echo "==> GitLab PAT provisioned and written to .env"
+}
+_ensure_gitlab_token
+
 # 1. Ensure namespace exists
 if ! curl_api "${GITLAB_URL}/api/v4/groups?search=${NAMESPACE}" | grep -q "\"path\":\"${NAMESPACE}\""; then
     echo "==> creating group ${NAMESPACE}"
