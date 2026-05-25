@@ -52,9 +52,43 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
 
 
 def initialize(conn: sqlite3.Connection) -> None:
-    """Apply schema.sql against the given connection (idempotent)."""
+    """Apply schema.sql against the given connection (idempotent).
+
+    SQLite's `CREATE TABLE IF NOT EXISTS` doesn't reconcile columns when a
+    table exists with an older shape. Before running the schema we apply
+    forward-only ALTERs for known additive migrations so the rest of
+    schema.sql (indexes etc.) can reference the new columns.
+    """
+    _apply_lightweight_migrations(conn)
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(sql)
+
+
+_ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # (table, column, "type + default" suffix used in ALTER TABLE)
+    ("decisions", "run_date", "TEXT NOT NULL DEFAULT ''"),
+    ("decisions", "needs_review", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
+def _apply_lightweight_migrations(conn: sqlite3.Connection) -> None:
+    """Add missing columns on existing tables. Idempotent + cheap."""
+    existing_tables: set[str] = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    for table, column, type_default in _ADDITIVE_COLUMNS:
+        if table not in existing_tables:
+            continue  # CREATE TABLE in schema.sql will produce the right shape
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {type_default}")
+    # Backfill run_date on old decisions rows from their created_at prefix
+    # so they don't silently land under "" in the filter.
+    if "decisions" in existing_tables:
+        conn.execute(
+            "UPDATE decisions SET run_date = substr(created_at, 1, 10) "
+            "WHERE run_date = '' OR run_date IS NULL"
+        )
 
 
 @contextmanager

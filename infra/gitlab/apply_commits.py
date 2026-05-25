@@ -28,6 +28,10 @@ from typing import Any
 import httpx
 import yaml
 
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 4
+_BACKOFF_SECONDS = (1.0, 2.0, 4.0, 8.0)
+
 
 def main() -> None:
     p = argparse.ArgumentParser()

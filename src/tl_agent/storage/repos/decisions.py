@@ -111,7 +111,5 @@ def list_recent(
 
 def list_run_dates(conn: sqlite3.Connection) -> list[str]:
     """Distinct run_date values that have at least one decision row."""
-    rows = conn.execute(
-        "SELECT DISTINCT run_date AS d FROM decisions ORDER BY d DESC"
-    ).fetchall()
+    rows = conn.execute("SELECT DISTINCT run_date AS d FROM decisions ORDER BY d DESC").fetchall()
     return [r["d"] for r in rows if r["d"]]

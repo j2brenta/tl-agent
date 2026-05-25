@@ -1,34 +1,72 @@
 {% extends "_base.html" %}
-{% block title %}Audit log{% if selected_date %} — {{ selected_date }}{% endif %}{% endblock %}
+{% block title %}Decisions{% if selected_date %} · {{ selected_date }}{% endif %}{% endblock %}
+{% block nav_decisions %}active{% endblock %}
+
+{% block page_data %}
+<script>
+  window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
+  window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+</script>
+{% endblock %}
 
 {% block body %}
-<h1>Audit log{% if selected_date %} — {{ selected_date }}{% endif %}</h1>
+<div class="page-header">
+  <h1>Audit log</h1>
+  {% if selected_date %}
+    <span class="date-label">{{ selected_date }}</span>
+  {% endif %}
+</div>
 
-{% include "_date_picker.html" %}
-
-<p><em>{{ decisions|length }} decision{{ "s" if decisions|length != 1 else "" }}
-{% if selected_date %} on {{ selected_date }}{% else %} (most recent across all runs){% endif %}</em></p>
+<p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">
+  {{ decisions|length }} decision{{ "s" if decisions|length != 1 else "" }}
+  {% if selected_date %} on {{ selected_date }}{% else %} (most recent across all runs){% endif %}
+</p>
 
 {% if not decisions %}
-  <p>No decisions{% if selected_date %} for {{ selected_date }}{% endif %}.</p>
+<div class="empty-state">
+  <div style="font-size:36px">◉</div>
+  <h2 style="margin-top:12px;font-size:16px;color:var(--text)">No decisions found</h2>
+  <p>{% if selected_date %}Nothing recorded for {{ selected_date }}.{% else %}Run <code>tl-agent run</code> to generate decisions.{% endif %}</p>
+</div>
 {% else %}
-<table>
-  <thead>
-    <tr><th>run</th><th>created (local)</th><th>hotspot</th><th>mode</th><th>needs review?</th><th>action</th><th>sent</th></tr>
-  </thead>
-  <tbody>
-    {% for d in decisions %}
-    <tr {% if d.needs_review %}style="background:#fff3e0"{% endif %}>
-      <td>{{ d.run_date }}</td>
-      <td><time datetime="{{ d.created_at.isoformat() }}">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</time></td>
-      <td><code>{{ d.hotspot_id }}</code></td>
-      <td>{{ d.proposed_mode.value }}</td>
-      <td>{{ "⚠" if d.needs_review else "" }}</td>
-      <td>{{ d.tl_action.value if d.tl_action else "-" }}</td>
-      <td>{{ (d.sent_provider + ":" + d.sent_message_id[:12]) if d.sent_message_id else "-" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="card" style="padding:0;overflow:hidden">
+  <table>
+    <thead>
+      <tr>
+        <th>Run</th>
+        <th>Created</th>
+        <th>Hotspot</th>
+        <th>Mode</th>
+        <th>Review?</th>
+        <th>Action</th>
+        <th>Sent</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in decisions %}
+      <tr {% if d.needs_review %}style="background:var(--amber-bg)"{% endif %}>
+        <td style="font-family:var(--mono);font-size:12px;white-space:nowrap">{{ d.run_date }}</td>
+        <td style="white-space:nowrap"><time datetime="{{ d.created_at.isoformat() }}">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</time></td>
+        <td><code>{{ d.hotspot_id }}</code></td>
+        <td><span class="mode">{{ d.proposed_mode.value }}</span></td>
+        <td>{% if d.needs_review %}<span class="badge badge-amber">⚠ review</span>{% endif %}</td>
+        <td>
+          {% if d.tl_action %}
+            {% if d.tl_action.value == 'approved' %}<span class="badge badge-green">{{ d.tl_action.value }}</span>
+            {% elif d.tl_action.value == 'rejected' %}<span class="badge badge-red">{{ d.tl_action.value }}</span>
+            {% else %}<span class="badge badge-gray">{{ d.tl_action.value }}</span>
+            {% endif %}
+          {% else %}
+            <span style="color:var(--text-faint)">—</span>
+          {% endif %}
+        </td>
+        <td style="font-size:12px;color:var(--text-muted);font-family:var(--mono)">
+          {{ (d.sent_provider + ":" + d.sent_message_id[:12]) if d.sent_message_id else "—" }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}

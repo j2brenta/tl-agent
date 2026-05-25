@@ -111,7 +111,7 @@ Default chat provider is Mattermost. To switch, set
 
 ---
 
-## Tradeoffs — what we did NOT build, and why
+## Tradeoffs — what was NOT build, and why
 
 ### No LangChain / CrewAI / AutoGen wrapper
 
@@ -401,13 +401,6 @@ template edit in templates/_decision_card.html, not a missing pipeline step.
 
 LLM I/O (the "what did the model actually see and say"): that's traces, not memory — traces/YYYY-MM-DD/spans.jsonl or Phoenix at localhost:6006 (make trace). Every
 phase_span / tool_span / llm_span lands there with inputs, outputs, tokens, latency.
-
-On the broader testing-flow asks from your earlier message — three small gaps vs. what's there now:
-- tl-agent run --date YYYY-MM-DD already exists (src/tl_agent/cli.py:36). For the web side, there's no kickoff route yet — you'd add POST /runs (taking date + pasted
-standup_text) to src/tl_agent/web/routes/ and stream phase progress to stdout via the existing logger.
-- Clean-slate reset: make nuke tears compose volumes; make seed re-seeds. M
-- SQLite state file — make reset-state deletes the DB file and re-runs storage/schema.sql, then make seed.
-
 
 ---
 

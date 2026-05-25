@@ -51,6 +51,63 @@ app.include_router(decisions_route.router)
 app.include_router(sprint_route.router)
 
 
+@app.post("/jira/import", response_class=HTMLResponse)
+async def jira_import(date: str | None = None) -> HTMLResponse:
+    """Pull the active sprint from Jira and save a snapshot for the given date."""
+    from datetime import date as _date
+
+    from tl_agent.storage import connect, transaction
+    from tl_agent.storage.repos import snapshots as snapshots_repo
+    from tl_agent.tools.base import ToolError
+    from tl_agent.tools.jira import ListSprintIn, ListSprintTool
+
+    run_date_iso = date or _date.today().isoformat()
+    try:
+        run_date = _date.fromisoformat(run_date_iso)
+    except ValueError:
+        return HTMLResponse(
+            '<div id="jira-status" class="banner banner-warn">⚠ Invalid date.</div>'
+        )
+
+    try:
+        tool = ListSprintTool()
+        outcome = await tool.invoke(ListSprintIn().model_dump(), run_date_iso=run_date_iso)
+        if isinstance(outcome, ToolError):
+            raise RuntimeError(outcome.message)
+        result = outcome.value
+    except Exception as exc:
+        logger.warning("jira/import failed: %s", exc)
+        return HTMLResponse(
+            f'<div id="jira-status" class="banner banner-warn">⚠ Jira fetch failed: {exc}</div>'
+        )
+
+    from tl_agent.settings import get_settings
+
+    conn = connect(get_settings().sqlite_path)
+    with transaction(conn):
+        for ticket in result.tickets:
+            snapshots_repo.upsert(conn, run_date, ticket)
+
+    response = HTMLResponse(
+        f'<div id="jira-status" class="banner banner-ok">'
+        f"✓ Imported {len(result.tickets)} tickets from {result.sprint_id}. Reloading…"
+        f"</div>"
+    )
+    response.headers["HX-Redirect"] = f"/sprint?date={run_date_iso}"
+    return response
+
+
+@app.post("/standup/import", response_class=HTMLResponse)
+async def standup_import(date: str | None = None) -> HTMLResponse:
+    """Stub — returns a banner telling the user this isn't wired yet."""
+    return HTMLResponse(
+        '<div id="standup-status" class="banner banner-warn">'
+        "⚠ Mattermost import is not yet wired — run "
+        "<code>tl-agent run</code> to populate standup data."
+        "</div>"
+    )
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok", "today": date.today().isoformat()}

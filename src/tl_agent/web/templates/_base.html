@@ -2,54 +2,500 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}tl-agent{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@2.0.3" integrity="sha384-0895/pl2MU10Hqc6jd4RvrthNlDiE9U1tWmX7WRESftEDRosgxNsQG/Ze9YMRzHq" crossorigin="anonymous"></script>
   <style>
-    body { font: 14px/1.4 system-ui, sans-serif; max-width: 880px; margin: 32px auto; color: #222; }
-    h1   { font-size: 18px; }
-    nav  { margin-bottom: 24px; }
-    nav a { margin-right: 12px; }
-    .card { border: 1px solid #ddd; padding: 12px 16px; margin: 12px 0; border-radius: 6px; background: #fafafa; }
-    .mode { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 11px; text-transform: uppercase; background: #eef; }
-    .body { white-space: pre-wrap; margin: 8px 0; font-family: ui-monospace, monospace; font-size: 13px; }
-    button { padding: 4px 10px; margin-right: 6px; }
-    .approved { background: #e6ffec; }
-    .rejected { background: #ffe6e6; color: #800; }
-    .pending  { background: #fffbe6; }
-    .card:has(.needs-review-tag) { border-color: #c97a00; border-width: 2px; background: #fff3e0; }
-    .needs-review-tag {
-      display: inline-block; padding: 2px 8px; margin-left: 8px;
-      border-radius: 3px; font-size: 11px; font-weight: 600;
-      background: #c97a00; color: #fff;
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sidebar-bg: #0f172a;
+      --sidebar-border: #1e293b;
+      --sidebar-active: #1e293b;
+      --sidebar-hover: #162032;
+      --sidebar-text: #94a3b8;
+      --sidebar-text-bright: #e2e8f0;
+      --sidebar-accent: #3b82f6;
+
+      --bg: #f1f5f9;
+      --surface: #ffffff;
+      --surface-raised: #ffffff;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --text-faint: #94a3b8;
+
+      --green: #10b981;
+      --green-bg: #d1fae5;
+      --green-text: #065f46;
+      --amber: #f59e0b;
+      --amber-bg: #fef3c7;
+      --amber-text: #92400e;
+      --red: #ef4444;
+      --red-bg: #fee2e2;
+      --red-text: #991b1b;
+      --blue: #3b82f6;
+      --blue-bg: #dbeafe;
+      --blue-text: #1e40af;
+      --purple: #8b5cf6;
+      --purple-bg: #ede9fe;
+      --purple-text: #5b21b6;
+      --gray-bg: #f1f5f9;
+      --gray-text: #475569;
+
+      --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', monospace;
+      --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+      --radius-sm: 4px;
+      --radius: 8px;
+      --radius-lg: 12px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
+      --shadow: 0 4px 6px -1px rgba(0,0,0,.08), 0 2px 4px -1px rgba(0,0,0,.04);
+
+      --sidebar-w: 220px;
     }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .app {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--sidebar-bg);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      border-right: 1px solid var(--sidebar-border);
+    }
+
+    .sidebar-logo {
+      padding: 20px 16px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--sidebar-text-bright);
+      font-family: var(--mono);
+      border-bottom: 1px solid var(--sidebar-border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sidebar-logo-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      flex-shrink: 0;
+    }
+
+    .sidebar-nav {
+      padding: 12px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      border-bottom: 1px solid var(--sidebar-border);
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--sidebar-text);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: background .12s, color .12s;
+    }
+
+    .nav-link:hover { background: var(--sidebar-hover); color: var(--sidebar-text-bright); }
+    .nav-link.active { background: var(--sidebar-active); color: var(--sidebar-text-bright); }
+    .nav-link.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      width: 3px;
+      height: 20px;
+      background: var(--sidebar-accent);
+      border-radius: 0 2px 2px 0;
+    }
+    .nav-link { position: relative; }
+
+    .nav-icon { font-size: 14px; width: 16px; text-align: center; }
+
+    .sidebar-section {
+      padding: 16px 8px 8px;
+      flex: 1;
+    }
+
+    .sidebar-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #475569;
+      padding: 0 8px;
+      margin-bottom: 6px;
+    }
+
+    .date-chips {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .date-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--sidebar-text);
+      text-decoration: none;
+      font-size: 12px;
+      font-family: var(--mono);
+      transition: background .1s, color .1s;
+      cursor: pointer;
+    }
+
+    .date-chip:hover { background: var(--sidebar-hover); color: var(--sidebar-text-bright); }
+
+    .date-chip.active {
+      background: var(--sidebar-active);
+      color: var(--sidebar-text-bright);
+      font-weight: 600;
+    }
+
+    .date-chip .chip-dot {
+      font-size: 9px;
+      flex-shrink: 0;
+    }
+
+    .date-chip .chip-dot.has-data { color: var(--green); }
+    .date-chip .chip-dot.no-data  { color: #334155; }
+
+    .date-chip .chip-label { flex: 1; }
+
+    .date-chip .chip-day {
+      font-size: 10px;
+      color: #475569;
+      font-family: var(--sans);
+    }
+
+    .date-chip.active .chip-day { color: var(--sidebar-text); }
+
+    /* ── Main content ── */
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 32px;
+      min-width: 0;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .page-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .page-header .sprint-name {
+      font-weight: 400;
+      color: var(--text-muted);
+      font-size: 16px;
+    }
+
+    .page-header .date-label {
+      margin-left: auto;
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--text-faint);
+      background: var(--border);
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+
+    .card.approved { background: #f0fdf4; border-color: #bbf7d0; }
+    .card.rejected { background: #fff1f2; border-color: #fecdd3; }
+    .card.pending  { background: var(--surface); }
+    .card:has(.needs-review-tag) { border-color: var(--amber); border-width: 2px; background: var(--amber-bg); }
+
+    /* ── Badges / pills ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .badge-green  { background: var(--green-bg);  color: var(--green-text); }
+    .badge-amber  { background: var(--amber-bg);  color: var(--amber-text); }
+    .badge-red    { background: var(--red-bg);    color: var(--red-text); }
+    .badge-blue   { background: var(--blue-bg);   color: var(--blue-text); }
+    .badge-purple { background: var(--purple-bg); color: var(--purple-text); }
+    .badge-gray   { background: var(--gray-bg);   color: var(--gray-text); }
+
+    .mode {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      background: var(--blue-bg);
+      color: var(--blue-text);
+    }
+
+    .needs-review-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      margin-left: 8px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--amber);
+      color: #fff;
+    }
+
+    /* ── Decision card body ── */
+    .body {
+      white-space: pre-wrap;
+      margin: 10px 0;
+      font-family: var(--mono);
+      font-size: 12px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      line-height: 1.6;
+    }
+
+    /* ── Tables ── */
     table { border-collapse: collapse; width: 100%; font-size: 13px; }
-    th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eee; }
+    th {
+      text-align: left;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+
+    /* ── Buttons ── */
+    button, .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: var(--sans);
+      cursor: pointer;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--text);
+      transition: background .1s, border-color .1s;
+    }
+    button:hover { background: var(--bg); }
+    button[type="submit"]:first-of-type { border-color: var(--green); color: var(--green-text); background: var(--green-bg); }
+    button[type="submit"]:first-of-type:hover { background: #a7f3d0; }
+
+    .btn-import {
+      padding: 4px 12px;
+      background: var(--amber-bg);
+      border-color: var(--amber);
+      color: var(--amber-text);
+      font-weight: 600;
+    }
+    .btn-import:hover { background: #fde68a; }
+
+    /* ── Banners ── */
+    .banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      margin-bottom: 20px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .banner-ok   { background: var(--green-bg); color: var(--green-text); border: 1px solid #6ee7b7; }
+    .banner-warn { background: var(--amber-bg); color: var(--amber-text); border: 1px solid #fcd34d; }
+
+    /* ── Progress bar ── */
+    .progress-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .progress-fill { height: 100%; background: var(--green); border-radius: 99px; transition: width .3s; }
+
+    /* ── Section label ── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 8px;
+    }
+
+    /* ── Misc ── */
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); font-size: .9em; background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+    details summary { cursor: pointer; font-size: 12px; color: var(--text-muted); }
+    details summary:hover { color: var(--text); }
+
+    .empty-state {
+      text-align: center;
+      padding: 64px 32px;
+      color: var(--text-muted);
+    }
+    .empty-state p { margin-top: 8px; font-size: 13px; }
+
+    /* ── Timezone rewrite ── */
+    time[datetime] { font-family: var(--mono); font-size: .95em; }
   </style>
 </head>
 <body>
-  <nav>
-    <a href="/sprint">Sprint</a>
-    <a href="/brief">Today's brief</a>
-    <a href="/decisions">Audit log</a>
-    <a href="http://localhost:6006">Traces (Phoenix)</a>
-  </nav>
-  {% block body %}{% endblock %}
+  {% block page_data %}{% endblock %}
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span class="sidebar-logo-dot"></span>
+        tl-agent
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="/sprint"    class="nav-link {% block nav_sprint    %}{% endblock %}">
+          <span class="nav-icon">◈</span> Sprint
+        </a>
+        <a href="/brief"     class="nav-link {% block nav_brief     %}{% endblock %}">
+          <span class="nav-icon">◇</span> Brief
+        </a>
+        <a href="/decisions" class="nav-link {% block nav_decisions %}{% endblock %}">
+          <span class="nav-icon">◉</span> Decisions
+        </a>
+        <a href="http://localhost:6006" target="_blank" class="nav-link">
+          <span class="nav-icon">↗</span> Traces
+        </a>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Recent days</div>
+        <div class="date-chips" id="date-timeline"></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+
   <script>
-    // Rewrite every `<time datetime="...">` to the visitor's local TZ.
-    // The server emits ISO-8601 UTC; the browser knows the user's offset.
-    document.querySelectorAll("time[datetime]").forEach(function (el) {
+    // Rewrite <time datetime="..."> to visitor's local TZ
+    document.querySelectorAll("time[datetime]").forEach(function(el) {
       var d = new Date(el.getAttribute("datetime"));
       if (isNaN(d.getTime())) return;
       var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-      var pad = function (n) { return String(n).padStart(2, "0"); };
+      var pad = function(n) { return String(n).padStart(2, "0"); };
       var label = pad(d.getHours()) + ":" + pad(d.getMinutes());
-      // Preserve the YYYY-MM-DD prefix on rows that had one.
       if (/^\d{4}-\d{2}-\d{2}/.test(el.textContent.trim())) {
-        label = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + label;
+        label = d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) + " " + label;
       }
       el.textContent = label + " " + tz;
       el.title = "UTC: " + el.getAttribute("datetime");
     });
+
+    // Build date timeline chips
+    (function() {
+      var available = window.TL_AVAILABLE_DATES || [];
+      var selected  = window.TL_SELECTED_DATE  || "";
+      var path      = window.location.pathname;
+      var availSet  = new Set(available);
+
+      var days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+      var chips = document.getElementById("date-timeline");
+      if (!chips) return;
+
+      var today = new Date();
+      today.setHours(0,0,0,0);
+      var html = "";
+
+      for (var i = 0; i < 14; i++) {
+        var d = new Date(today);
+        d.setDate(today.getDate() - i);
+        var pad = function(n) { return String(n).padStart(2,"0"); };
+        var iso = d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+        var hasData = availSet.has(iso);
+        var isActive = iso === selected;
+        var dayName  = days[d.getDay()];
+        var mmdd     = pad(d.getMonth()+1) + "/" + pad(d.getDate());
+
+        html += '<a href="' + path + '?date=' + iso + '" class="date-chip' + (isActive ? ' active' : '') + '">'
+          + '<span class="chip-dot ' + (hasData ? 'has-data' : 'no-data') + '">'
+          + (hasData ? '●' : '○') + '</span>'
+          + '<span class="chip-label">' + iso + '</span>'
+          + '<span class="chip-day">' + dayName + '</span>'
+          + '</a>';
+      }
+      chips.innerHTML = html;
+    })();
   </script>
 </body>
 </html>

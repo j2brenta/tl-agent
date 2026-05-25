@@ -1,22 +1,41 @@
 {% extends "_base.html" %}
-{% block title %}Brief — {{ today }}{% endblock %}
+{% block title %}Brief · {{ today }}{% endblock %}
+{% block nav_brief %}active{% endblock %}
+
+{% block page_data %}
+<script>
+  window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
+  window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+</script>
+{% endblock %}
 
 {% block body %}
-<h1>Brief — {{ today }}{% if not selected_date %} <small style="color:#888">(all pending)</small>{% endif %}</h1>
+<div class="page-header">
+  <h1>Brief</h1>
+  {% if selected_date %}
+    <span class="date-label">{{ selected_date }}</span>
+  {% else %}
+    <span class="date-label">all pending</span>
+  {% endif %}
+</div>
 
-{% include "_date_picker.html" %}
-
-<p><em>{{ pending|length }} pending decision{{ "s" if pending|length != 1 else "" }}
-{% if selected_date %} drafted on {{ selected_date }}{% else %} (across every run){% endif %}</em></p>
+<p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">
+  {{ pending|length }} pending decision{{ "s" if pending|length != 1 else "" }}
+  {% if selected_date %} from {{ selected_date }}{% else %} across all runs{% endif %}
+</p>
 
 {% if not pending %}
-  <p>Nothing to review here.
+<div class="empty-state">
+  <div style="font-size:36px">◇</div>
+  <h2 style="margin-top:12px;font-size:16px;color:var(--text)">Nothing to review</h2>
+  <p>
     {% if selected_date %}
-      Try <a href="/brief">all pending</a>, or pick another date above.
+      Try selecting another date, or <a href="/brief">view all pending</a>.
     {% else %}
       Run <code>tl-agent run</code> to generate a brief.
     {% endif %}
   </p>
+</div>
 {% endif %}
 
 {% for d in pending %}

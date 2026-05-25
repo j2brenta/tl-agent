@@ -65,7 +65,19 @@ say "bringing compose stack up (idempotent; first-run GitLab takes ~90s)"
 make up
 ok "stack healthy"
 
-# ---------- 2. seed everything ----------
+# ---------- 2. (optional) wipe SQLite state BEFORE seed ----------
+# Reset must run before `make seed` because seed calls `init-db`, which
+# applies schema.sql against the existing DB. If the on-disk schema is
+# stale (e.g. missing the run_date column), schema.sql can't add columns
+# to an existing table — `tl-agent init-db` has a lightweight migration
+# path, but a clean reset is the simplest guarantee for `--reset`.
+if [ "$DO_RESET" = 1 ]; then
+  say "wiping SQLite state (--reset)"
+  uv run python -m tl_agent.cli reset --confirm
+  ok "state reset"
+fi
+
+# ---------- 3. seed everything ----------
 say "seeding Jira mock / GitLab / Mattermost / SQLite baselines"
 # Capture admin token from seed stdout so we can write it back to .env.
 SEED_OUT="$(mktemp)"
@@ -89,15 +101,6 @@ else
   printf '\nTLA_MATTERMOST_TOKEN=%s\n' "$ADMIN_TOKEN" >> .env
 fi
 ok "seeded; mattermost admin token written to .env"
-
-# ---------- 3. optional state reset ----------
-if [ "$DO_RESET" = 1 ]; then
-  say "wiping SQLite state (--reset)"
-  # `make reset-state` deletes the db, re-applies schema, then re-seeds —
-  # we already seeded, but it's idempotent.
-  make reset-state
-  ok "state reset"
-fi
 
 # ---------- 3b. refresh commits anchored to the demo date ----------
 # GitLab's Files API stamps commits with wall-clock time at the API call —

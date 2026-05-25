@@ -1,167 +1,314 @@
 {% extends "_base.html" %}
-{% block title %}Sprint — {{ selected_date or "no data" }}{% endblock %}
+{% block title %}Sprint{% if sprint_name %} · {{ sprint_name }}{% endif %}{% endblock %}
+{% block nav_sprint %}active{% endblock %}
+
+{% block page_data %}
+<script>
+  window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
+  window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+</script>
+{% endblock %}
 
 {% block body %}
-<h1>Sprint status{% if sprint_name %} · <span style="font-weight:400;color:#555">{{ sprint_name }}</span>{% endif %}</h1>
-
-<form method="get" style="margin-bottom:12px">
-  <label>Run date: <input type="date" name="date" value="{{ selected_date or '' }}"></label>
-  <button type="submit">go</button>
-  {% if selected_date %}<a href="?" style="margin-left:8px">latest</a>{% endif %}
-</form>
-
-{% if available_dates %}
-<p style="margin:-4px 0 16px;font-size:12px;color:#555">
-  {% for d in available_dates[:10] %}
-    <a href="?date={{ d }}" {% if d == selected_date %}style="font-weight:600"{% endif %}>{{ d }}</a>{% if not loop.last %} · {% endif %}
-  {% endfor %}
-  {% if available_dates|length > 10 %}<span style="color:#888">(+{{ available_dates|length - 10 }} older)</span>{% endif %}
-</p>
-{% endif %}
 
 {% if no_data %}
-<p>No sprint data yet. Run <code>tl-agent run</code> to populate.</p>
+<div class="empty-state">
+  <div style="font-size:40px">◈</div>
+  <h2 style="margin-top:12px;font-size:18px;color:var(--text)">No sprint data yet</h2>
+  <p>Run <code>tl-agent run</code> to populate the dashboard.</p>
+</div>
 {% else %}
 
-{# ── Sprint summary bar ── #}
-<div class="card" style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;padding:10px 16px;margin-bottom:20px">
-  <div><span style="font-size:22px;font-weight:700">{{ done_total }}/{{ total }}</span> <span style="color:#555;font-size:12px">tickets done</span></div>
-  <div style="flex:1;min-width:160px">
-    <div style="background:#eee;border-radius:4px;height:8px;overflow:hidden">
-      <div style="background:#2da44e;height:100%;width:{{ ((done_total/total)*100)|round|int if total else 0 }}%"></div>
-    </div>
-    <div style="font-size:11px;color:#555;margin-top:3px">{{ ((done_total/total)*100)|round|int if total else 0 }}% complete</div>
-  </div>
-  {% if planned_pts > 0 %}
-  <div><span style="font-size:16px;font-weight:600">{{ done_pts|round(1) }}</span><span style="color:#555;font-size:12px"> / {{ planned_pts|round(1) }} pts</span></div>
-  {% endif %}
-  <div style="display:flex;gap:10px;font-size:12px">
-    {% if in_progress_total %}<span style="background:#ddf4ff;padding:2px 8px;border-radius:3px">{{ in_progress_total }} in progress</span>{% endif %}
-    {% if in_review_total %}<span style="background:#f3f0ff;padding:2px 8px;border-radius:3px">{{ in_review_total }} in review</span>{% endif %}
-    {% if blocked_total %}<span style="background:#ffe6e6;padding:2px 8px;border-radius:3px;color:#800">{{ blocked_total }} blocked</span>{% endif %}
-  </div>
+{# ── Page header ── #}
+<div class="page-header">
+  <h1>Sprint <span class="sprint-name">{% if sprint_name %}{{ sprint_name }}{% endif %}</span></h1>
+  {% if selected_date %}<span class="date-label">{{ selected_date }}</span>{% endif %}
 </div>
 
-{# ── Per-engineer panels ── #}
-{% for row in engineers %}
-{% set eng = row.engineer %}
-<div class="card" style="margin-bottom:16px;padding:14px 16px">
-  <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
-    <strong style="font-size:15px">{{ eng.display_name }}</strong>
-    <span style="font-size:11px;color:#888">{{ eng.role }}</span>
-    {% if row.on_track %}
-      <span style="background:#e6ffec;color:#1a7f37;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">on track</span>
-    {% else %}
-      <span style="background:#ffe6e6;color:#800;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">needs attention</span>
-    {% endif %}
-    <span style="margin-left:auto;font-size:12px;color:#888">
-      {{ row.done_count }}/{{ row.tickets|length }} tickets done
-      {% if row.blocked_count %} · <span style="color:#c00">{{ row.blocked_count }} blocked</span>{% endif %}
-    </span>
+{# ── Standup status banner ── #}
+{% set has_standup = engineers | selectattr('observation') | list | length > 0 %}
+<div id="standup-status" class="banner banner-{% if has_standup %}ok{% else %}warn{% endif %}">
+  {% if has_standup %}
+    <span>✓</span>
+    <span>Standup data available for this day</span>
+  {% else %}
+    <span>⚠</span>
+    <span>No standup data for this day.</span>
+    <button class="btn-import"
+            hx-post="/standup/import"
+            hx-vals='{"date":"{{ selected_date }}"}'
+            hx-target="#standup-status"
+            hx-swap="outerHTML">
+      Import from Mattermost
+    </button>
+  {% endif %}
+</div>
+
+{# ── Jira import banner (shown when no ticket data for selected date) ── #}
+{% if total == 0 and selected_date %}
+<div id="jira-status" class="banner banner-warn">
+  <span>◈</span>
+  <span>No Jira snapshot for {{ selected_date }}.</span>
+  <button class="btn-import"
+          hx-post="/jira/import"
+          hx-vals='{"date":"{{ selected_date }}"}'
+          hx-target="#jira-status"
+          hx-swap="outerHTML">
+    Import from Jira
+  </button>
+</div>
+{% endif %}
+
+{# ── Team summary bar (only when there are tickets) ── #}
+{% if total > 0 %}
+<div class="card" style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;padding:14px 20px;margin-bottom:20px">
+  <div>
+    <div style="font-size:24px;font-weight:800;line-height:1">{{ done_total }}<span style="color:var(--text-faint);font-size:16px;font-weight:400">/{{ total }}</span></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px">tickets done</div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div style="flex:1;min-width:140px">
+    <div class="progress-track">
+      <div class="progress-fill" style="width:{{ ((done_total/total)*100)|round|int if total else 0 }}%"></div>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">{{ ((done_total/total)*100)|round|int if total else 0 }}% complete</div>
+  </div>
+
+  {% if planned_pts > 0 %}
+  <div>
+    <div style="font-size:18px;font-weight:700;line-height:1">{{ done_pts|round(1) }}<span style="color:var(--text-faint);font-size:13px;font-weight:400"> / {{ planned_pts|round(1) }} pts</span></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px">story points</div>
+  </div>
+  {% endif %}
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    {% set engineers_with_data = engineers | selectattr('tickets') | list + engineers | selectattr('observation') | list %}
+    {% set on_track_count = engineers | selectattr('on_track') | list | length %}
+    {% if total > 0 and on_track_count %}
+    <span class="badge badge-green">{{ on_track_count }} on track</span>
+    {% endif %}
+    {% if in_progress_total %}
+    <span class="badge badge-blue">{{ in_progress_total }} in progress</span>
+    {% endif %}
+    {% if in_review_total %}
+    <span class="badge badge-purple">{{ in_review_total }} in review</span>
+    {% endif %}
+    {% if blocked_total %}
+    <span class="badge badge-red">{{ blocked_total }} blocked</span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}{# end total > 0 summary bar #}
+
+{# ── Per-engineer panels ── #}
+{% set avatar_colors = ["#6366f1","#0ea5e9","#10b981","#f59e0b","#ec4899","#8b5cf6"] %}
+{% for row in engineers %}
+{% set eng = row.engineer %}
+{% set initials = (eng.display_name.split()[0][0] + (eng.display_name.split()[-1][0] if eng.display_name.split()|length > 1 else '')) | upper %}
+{% set avatar_color = avatar_colors[loop.index0 % avatar_colors|length] %}
+
+<div class="card" style="margin-bottom:14px">
+  {# Header row #}
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+    <div style="width:36px;height:36px;border-radius:50%;background:{{ avatar_color }};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">
+      {{ initials }}
+    </div>
+    <div>
+      <div style="font-size:15px;font-weight:600;line-height:1.2">{{ eng.display_name }}</div>
+      <div style="font-size:11px;color:var(--text-muted)">{{ eng.role }}</div>
+    </div>
+    {% if not row.tickets and not row.observation and not row.flags %}
+      <span class="badge badge-gray" style="margin-left:4px">unknown</span>
+    {% elif row.on_track %}
+      <span class="badge badge-green" style="margin-left:4px">on track</span>
+    {% else %}
+      <span class="badge badge-red" style="margin-left:4px">needs attention</span>
+    {% endif %}
+    <div style="margin-left:auto;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:center">
+      <span>{{ row.done_count }}/{{ row.tickets|length }} done</span>
+      {% if row.blocked_count %}
+      <span style="color:var(--red);font-weight:600">{{ row.blocked_count }} blocked</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Two-column body #}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
 
     {# Standup #}
     <div>
-      <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Standup</div>
+      <div class="section-label">Standup</div>
       {% if row.observation %}
         {% if row.observation.summary %}
-          <div style="font-size:13px;font-style:italic;color:#444;margin-bottom:6px">{{ row.observation.summary }}</div>
+          <div style="font-size:13px;font-style:italic;color:#334155;margin-bottom:8px;line-height:1.5">
+            "{{ row.observation.summary }}"
+          </div>
         {% endif %}
         <details>
-          <summary style="font-size:12px;color:#555;cursor:pointer">raw message</summary>
-          <pre style="font-size:12px;white-space:pre-wrap;margin:4px 0;padding:8px;background:#f6f8fa;border-radius:4px">{{ row.observation.raw }}</pre>
+          <summary>raw message</summary>
+          <pre style="font-size:11px;white-space:pre-wrap;margin-top:6px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);line-height:1.5">{{ row.observation.raw }}</pre>
         </details>
       {% else %}
-        <span style="color:#aaa;font-size:13px">no standup on record</span>
+        <div style="font-size:12px;color:var(--text-faint);font-style:italic">no standup recorded</div>
       {% endif %}
     </div>
 
     {# Tickets #}
     <div>
-      <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Sprint tickets</div>
+      <div class="section-label">Tickets ({{ row.tickets|length }})</div>
       {% if row.tickets %}
-        <table style="font-size:12px">
-          {% for t in row.tickets %}
-          <tr>
-            <td style="color:#555;padding-right:8px;white-space:nowrap">{{ t.key }}</td>
-            <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ t.summary }}">{{ t.summary }}</td>
-            <td style="padding-left:8px;white-space:nowrap">
-              {% set s = t.status.value %}
-              {% if s == 'done' %}<span style="background:#e6ffec;color:#1a7f37;padding:1px 6px;border-radius:3px">done</span>
-              {% elif s == 'blocked' %}<span style="background:#ffe6e6;color:#800;padding:1px 6px;border-radius:3px">blocked</span>
-              {% elif s == 'in_review' %}<span style="background:#f3f0ff;color:#5a3e9b;padding:1px 6px;border-radius:3px">review</span>
-              {% elif s == 'in_progress' %}<span style="background:#ddf4ff;color:#0550ae;padding:1px 6px;border-radius:3px">in prog</span>
-              {% else %}<span style="background:#f0f0f0;color:#555;padding:1px 6px;border-radius:3px">{{ s }}</span>
-              {% endif %}
-            </td>
-            {% if t.points %}<td style="padding-left:6px;color:#888;font-size:11px">{{ t.points|round(0)|int }}pt</td>{% endif %}
-          </tr>
-          {% endfor %}
-        </table>
+      <table style="font-size:12px">
+        {% for t in row.tickets %}
+        {% set s = t.status.value %}
+        <tr>
+          <td style="padding:4px 8px 4px 0;font-family:var(--mono);color:var(--text-muted);white-space:nowrap;font-size:11px">{{ t.key }}</td>
+          <td style="padding:4px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ t.summary }}">{{ t.summary }}</td>
+          <td style="padding:4px 0 4px 4px;white-space:nowrap">
+            {% if s == 'done' %}<span class="badge badge-green" style="font-size:10px">done</span>
+            {% elif s == 'blocked' %}<span class="badge badge-red" style="font-size:10px">blocked</span>
+            {% elif s == 'in_review' %}<span class="badge badge-purple" style="font-size:10px">review</span>
+            {% elif s == 'in_progress' %}<span class="badge badge-blue" style="font-size:10px">in prog</span>
+            {% else %}<span class="badge badge-gray" style="font-size:10px">{{ s }}</span>
+            {% endif %}
+          </td>
+          {% if t.points %}<td style="padding:4px 0 4px 6px;color:var(--text-faint);font-size:11px;white-space:nowrap">{{ t.points|round(0)|int }}pt</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </table>
       {% else %}
-        <span style="color:#aaa;font-size:13px">no tickets assigned</span>
+        <div style="font-size:12px;color:var(--text-faint);font-style:italic">no tickets assigned</div>
       {% endif %}
     </div>
   </div>
 
-  {# Flags for this engineer #}
+  {# Flags #}
   {% if row.flags %}
-  <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee">
-    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Flags</div>
-    {% for flag in row.flags %}
-    <div style="font-size:12px;margin-bottom:3px;display:flex;align-items:baseline;gap:8px">
-      {% if flag.days_hot >= 3 %}
-        <span style="color:#c00;font-weight:600">⚑</span>
-      {% elif flag.days_hot >= 2 %}
-        <span style="color:#c97a00;font-weight:600">⚑</span>
-      {% else %}
-        <span style="color:#888">⚑</span>
-      {% endif %}
-      <span>{{ flag.title }}</span>
-      <span style="color:#aaa">({{ flag.type.value.replace("_"," ") }} · {{ flag.days_hot }}d)</span>
-      {% if flag.related_ticket_ids %}
-        <span style="color:#888">→ {{ flag.related_ticket_ids|join(", ") }}</span>
-      {% endif %}
+  <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+    <div class="section-label">Flags</div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      {% for flag in row.flags %}
+      <div style="display:flex;align-items:baseline;gap:8px;font-size:12px">
+        {% if flag.days_hot >= 3 %}
+          <span style="color:var(--red);font-size:11px">⚑</span>
+        {% elif flag.days_hot >= 2 %}
+          <span style="color:var(--amber);font-size:11px">⚑</span>
+        {% else %}
+          <span style="color:var(--text-faint);font-size:11px">⚑</span>
+        {% endif %}
+        <span>{{ flag.title }}</span>
+        <span style="color:var(--text-faint);font-size:11px">({{ flag.type.value.replace("_"," ") }} · {{ flag.days_hot }}d)</span>
+        {% if flag.related_ticket_ids %}
+          <span style="color:var(--text-muted);font-family:var(--mono);font-size:11px">→ {{ flag.related_ticket_ids|join(", ") }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
   </div>
   {% endif %}
 
 </div>
 {% endfor %}
 
+{# ── All sprint tickets ── #}
+{% if total > 0 %}
+<div class="card" style="margin-top:8px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div style="font-size:15px;font-weight:600">All sprint tickets</div>
+    <span style="font-size:12px;color:var(--text-muted)">{{ total }} total</span>
+  </div>
+
+  {# Sort: blocked first, then in_progress, in_review, others, done last #}
+  {% set status_order = {'blocked':0,'in_progress':1,'in_review':2,'todo':3,'done':4} %}
+  {% set sorted_tickets = engineers | map(attribute='tickets') | sum(start=[]) %}
+  {% set all_tickets = [] %}
+  {% for eng_row in engineers %}
+    {% for t in eng_row.tickets %}{% set _ = all_tickets.append(t) %}{% endfor %}
+  {% endfor %}
+
+  <table>
+    <thead>
+      <tr>
+        <th>Key</th>
+        <th>Summary</th>
+        <th>Assignee</th>
+        <th>Status</th>
+        <th>Pts</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% macro ticket_row(t) %}
+      {% set s = t.status.value %}
+      <tr>
+        <td style="font-family:var(--mono);font-size:12px;white-space:nowrap;color:var(--text-muted)">{{ t.key }}</td>
+        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ t.summary }}">{{ t.summary }}</td>
+        <td style="color:var(--text-muted);font-size:12px;white-space:nowrap">{{ t.assignee or "—" }}</td>
+        <td style="white-space:nowrap">
+          {% if s == 'done' %}<span class="badge badge-green" style="font-size:10px">done</span>
+          {% elif s == 'blocked' %}<span class="badge badge-red" style="font-size:10px">blocked</span>
+          {% elif s == 'in_review' %}<span class="badge badge-purple" style="font-size:10px">in review</span>
+          {% elif s == 'in_progress' %}<span class="badge badge-blue" style="font-size:10px">in progress</span>
+          {% else %}<span class="badge badge-gray" style="font-size:10px">{{ s }}</span>
+          {% endif %}
+        </td>
+        <td style="font-size:12px;color:var(--text-faint)">{% if t.points %}{{ t.points|round(0)|int }}{% endif %}</td>
+      </tr>
+      {% endmacro %}
+
+      {# Blocked first #}
+      {% for eng_row in engineers %}
+        {% for t in eng_row.tickets if t.status.value == 'blocked' %}{{ ticket_row(t) }}{% endfor %}
+      {% endfor %}
+      {# In progress #}
+      {% for eng_row in engineers %}
+        {% for t in eng_row.tickets if t.status.value == 'in_progress' %}{{ ticket_row(t) }}{% endfor %}
+      {% endfor %}
+      {# In review #}
+      {% for eng_row in engineers %}
+        {% for t in eng_row.tickets if t.status.value == 'in_review' %}{{ ticket_row(t) }}{% endfor %}
+      {% endfor %}
+      {# Other (todo, etc.) #}
+      {% for eng_row in engineers %}
+        {% for t in eng_row.tickets if t.status.value not in ['blocked','in_progress','in_review','done'] %}{{ ticket_row(t) }}{% endfor %}
+      {% endfor %}
+      {# Done last #}
+      {% for eng_row in engineers %}
+        {% for t in eng_row.tickets if t.status.value == 'done' %}{{ ticket_row(t) }}{% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {# ── Team-wide flags ── #}
 {% if team_flags %}
-<div class="card" style="margin-bottom:16px">
-  <strong>Team-wide flags</strong>
+<div class="card" style="margin-top:8px">
+  <div style="font-size:14px;font-weight:600;margin-bottom:10px">Team flags</div>
   {% for flag in team_flags %}
-  <div style="font-size:13px;margin:6px 0;display:flex;gap:8px;align-items:baseline">
-    <span style="color:#c97a00;font-weight:600">⚑</span>
+  <div style="display:flex;gap:8px;align-items:baseline;font-size:13px;margin-bottom:5px">
+    <span style="color:var(--amber)">⚑</span>
     <span>{{ flag.title }}</span>
-    <span style="color:#aaa;font-size:11px">({{ flag.type.value.replace("_"," ") }} · {{ flag.days_hot }}d)</span>
+    <span style="color:var(--text-faint);font-size:11px">({{ flag.type.value.replace("_"," ") }} · {{ flag.days_hot }}d)</span>
   </div>
   {% endfor %}
 </div>
 {% endif %}
 
-{# ── Off-sprint / unplanned work ── #}
+{# ── Unplanned / off-sprint ── #}
 {% if off_sprint_flags or unplanned_tickets %}
-<div class="card" style="border-color:#c97a00;border-width:2px;background:#fffbe6">
-  <strong style="font-size:14px">Unplanned work</strong>
+<div class="card" style="border-color:var(--amber);border-width:2px;background:var(--amber-bg);margin-top:8px">
+  <div style="font-size:14px;font-weight:600;color:var(--amber-text);margin-bottom:12px">⚑ Unplanned work</div>
 
   {% if unplanned_tickets %}
-  <div style="margin-top:8px">
-    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Tickets added mid-sprint</div>
+  <div style="margin-bottom:12px">
+    <div class="section-label" style="color:var(--amber-text)">Tickets added mid-sprint</div>
     <table style="font-size:12px">
       {% for t in unplanned_tickets %}
       <tr>
-        <td style="color:#555;padding-right:8px;white-space:nowrap">{{ t.key }}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:nowrap;padding-right:10px">{{ t.key }}</td>
         <td>{{ t.summary }}</td>
-        <td style="padding-left:8px;color:#888;white-space:nowrap">{{ t.assignee or "—" }}</td>
-        {% if t.points %}<td style="padding-left:6px;color:#888;font-size:11px">{{ t.points|round(0)|int }}pt</td>{% endif %}
-        <td style="padding-left:8px;color:#aaa;font-size:11px">added {{ t.added_to_sprint_at.strftime("%Y-%m-%d") if t.added_to_sprint_at else "" }}</td>
+        <td style="color:var(--text-muted);padding:0 10px;white-space:nowrap">{{ t.assignee or "—" }}</td>
+        {% if t.points %}<td style="color:var(--text-faint);font-size:11px;white-space:nowrap">{{ t.points|round(0)|int }}pt</td>{% endif %}
+        <td style="color:var(--text-faint);font-size:11px;white-space:nowrap;padding-left:10px">added {{ t.added_to_sprint_at.strftime("%Y-%m-%d") if t.added_to_sprint_at else "" }}</td>
       </tr>
       {% endfor %}
     </table>
@@ -169,14 +316,14 @@
   {% endif %}
 
   {% if off_sprint_flags %}
-  <div style="margin-top:{% if unplanned_tickets %}10{% else %}8{% endif %}px">
-    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Off-sprint signals</div>
+  <div>
+    <div class="section-label" style="color:var(--amber-text)">Off-sprint signals</div>
     {% for flag in off_sprint_flags %}
-    <div style="font-size:12px;margin-bottom:3px;display:flex;gap:8px;align-items:baseline">
-      <span style="color:#c97a00;font-weight:600">⚑</span>
+    <div style="display:flex;gap:8px;align-items:baseline;font-size:12px;margin-bottom:4px">
+      <span style="color:var(--amber)">⚑</span>
       <span>{{ flag.title }}</span>
-      {% if flag.engineer_id %}<span style="color:#888">{{ flag.engineer_id }}</span>{% endif %}
-      <span style="color:#aaa">({{ flag.days_hot }}d)</span>
+      {% if flag.engineer_id %}<span style="color:var(--text-muted)">{{ flag.engineer_id }}</span>{% endif %}
+      <span style="color:var(--text-faint)">({{ flag.days_hot }}d)</span>
     </div>
     {% endfor %}
   </div>
