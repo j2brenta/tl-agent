@@ -16,6 +16,12 @@
     .approved { background: #e6ffec; }
     .rejected { background: #ffe6e6; color: #800; }
     .pending  { background: #fffbe6; }
+    .card:has(.needs-review-tag) { border-color: #c97a00; border-width: 2px; background: #fff3e0; }
+    .needs-review-tag {
+      display: inline-block; padding: 2px 8px; margin-left: 8px;
+      border-radius: 3px; font-size: 11px; font-weight: 600;
+      background: #c97a00; color: #fff;
+    }
     table { border-collapse: collapse; width: 100%; font-size: 13px; }
     th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eee; }
   </style>

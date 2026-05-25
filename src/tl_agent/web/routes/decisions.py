@@ -18,10 +18,25 @@ _env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=select_aut
 
 
 @router.get("/decisions", response_class=HTMLResponse)
-async def decisions_log() -> HTMLResponse:
+async def decisions_log(date: str | None = None) -> HTMLResponse:
+    from datetime import date as _date
+
     from tl_agent.settings import get_settings
 
     conn = connect(get_settings().sqlite_path)
-    recent = decisions_repo.list_recent(conn, limit=200)
+    selected: str | None = None
+    if date:
+        try:
+            selected = _date.fromisoformat(date).isoformat()
+        except ValueError:
+            selected = None
+    recent = decisions_repo.list_recent(conn, limit=200, run_date=selected)
+    available = decisions_repo.list_run_dates(conn)
     template = _env.get_template("decisions.html")
-    return HTMLResponse(template.render(decisions=recent))
+    return HTMLResponse(
+        template.render(
+            decisions=recent,
+            selected_date=selected,
+            available_dates=available,
+        )
+    )

@@ -42,7 +42,11 @@ class ResponseDraft(BaseModel):
     # 800 (was 400): smaller local models tend to be more verbose; the
     # rationale is for TL audit, not display, so the cap exists only to
     # bound storage, not to enforce concision.
-    rationale: str = Field(min_length=1, max_length=800)
+    rationale: str = Field(min_length=1, max_length=1500)
+    # True when Phase 6 couldn't get a clean draft and salvaged something
+    # from the deep-dive instead. The web UI flags these for human review;
+    # the LLM made its best attempt and the rest is the TL's call.
+    needs_review: bool = Field(default=False)
 
 
 class ApprovalAction(StrEnum):
@@ -68,6 +72,10 @@ class Decision(BaseModel):
     hotspot_id: str
     proposed_mode: ResponseMode
     proposed_body: str
+    # Carried over from ResponseDraft.needs_review; renders a HITL banner in
+    # the review UI so the TL knows this draft is salvage, not a clean LLM
+    # output. Stored as 0/1 in SQLite via the decisions repo.
+    needs_review: bool = False
     tl_action: ApprovalAction | None = None
     tl_acted_at: datetime | None = None
     final_body: str | None = None

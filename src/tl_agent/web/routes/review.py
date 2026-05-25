@@ -37,11 +37,38 @@ def _conn() -> object:
 
 
 @router.get("/brief", response_class=HTMLResponse)
-async def brief() -> HTMLResponse:
+async def brief(date: str | None = None) -> HTMLResponse:
     conn = _conn()
-    pending = decisions_repo.list_pending(conn)  # type: ignore[arg-type]
+    selected = _validate_date(date)
+    pending = decisions_repo.list_pending(conn, run_date=selected)  # type: ignore[arg-type]
+    available = decisions_repo.list_run_dates(conn)  # type: ignore[arg-type]
     template = _env.get_template("brief.html")
-    return HTMLResponse(template.render(pending=pending, today=date.today().isoformat()))
+    return HTMLResponse(
+        template.render(
+            pending=pending,
+            today=selected or _today_iso(),
+            selected_date=selected,
+            available_dates=available,
+        )
+    )
+
+
+def _validate_date(raw: str | None) -> str | None:
+    """ISO date sanity-check; falls back to None on garbage rather than 500."""
+    from datetime import date as _date
+
+    if not raw:
+        return None
+    try:
+        return _date.fromisoformat(raw).isoformat()
+    except ValueError:
+        return None
+
+
+def _today_iso() -> str:
+    from datetime import date as _date
+
+    return _date.today().isoformat()
 
 
 @router.post("/decisions/{decision_id}/approve", response_class=HTMLResponse)

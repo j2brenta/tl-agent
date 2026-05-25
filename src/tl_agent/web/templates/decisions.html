@@ -1,22 +1,33 @@
 {% extends "_base.html" %}
-{% block title %}Audit log{% endblock %}
+{% block title %}Audit log{% if selected_date %} — {{ selected_date }}{% endif %}{% endblock %}
 
 {% block body %}
-<h1>Audit log</h1>
+<h1>Audit log{% if selected_date %} — {{ selected_date }}{% endif %}</h1>
+
+{% include "_date_picker.html" %}
+
+<p><em>{{ decisions|length }} decision{{ "s" if decisions|length != 1 else "" }}
+{% if selected_date %} on {{ selected_date }}{% else %} (most recent across all runs){% endif %}</em></p>
+
+{% if not decisions %}
+  <p>No decisions{% if selected_date %} for {{ selected_date }}{% endif %}.</p>
+{% else %}
 <table>
   <thead>
-    <tr><th>created</th><th>hotspot</th><th>mode</th><th>action</th><th>sent</th></tr>
+    <tr><th>created</th><th>hotspot</th><th>mode</th><th>needs review?</th><th>action</th><th>sent</th></tr>
   </thead>
   <tbody>
     {% for d in decisions %}
-    <tr>
+    <tr {% if d.needs_review %}style="background:#fff3e0"{% endif %}>
       <td>{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
       <td><code>{{ d.hotspot_id }}</code></td>
       <td>{{ d.proposed_mode.value }}</td>
+      <td>{{ "⚠" if d.needs_review else "" }}</td>
       <td>{{ d.tl_action.value if d.tl_action else "-" }}</td>
       <td>{{ (d.sent_provider + ":" + d.sent_message_id[:12]) if d.sent_message_id else "-" }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+{% endif %}
 {% endblock %}

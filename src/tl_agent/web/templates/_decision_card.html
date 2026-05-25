@@ -7,6 +7,12 @@
     <span class="mode">{{ row.proposed_mode.value }}</span>
     <strong>{{ row.hotspot_id }}</strong>
     <small>· created {{ row.created_at.strftime("%H:%M") }}</small>
+    {% if row.needs_review %}
+    <span class="needs-review-tag"
+          title="Phase 6 couldn't extract a clean draft (model omitted/malformed required fields). The body is salvage from the deep-dive; please review and edit before approving.">
+      ⚠ NEEDS REVIEW
+    </span>
+    {% endif %}
   </div>
   <div class="body">{{ row.final_body or row.proposed_body }}</div>
 

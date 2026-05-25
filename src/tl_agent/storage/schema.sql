@@ -149,7 +149,8 @@ CREATE TABLE IF NOT EXISTS decisions (
     final_target    TEXT,
     trace_id        TEXT,
     sent_message_id TEXT,
-    sent_provider   TEXT
+    sent_provider   TEXT,
+    needs_review    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS decisions_by_time   ON decisions(created_at);
 CREATE INDEX IF NOT EXISTS decisions_pending   ON decisions(tl_action, created_at);

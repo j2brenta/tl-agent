@@ -82,6 +82,7 @@ async def run(
                 hotspot_id=draft.hotspot_id,
                 proposed_mode=draft.mode,
                 proposed_body=body,
+                needs_review=draft.needs_review,
                 trace_id=ctx.run_id,
             )
             decisions.insert(ctx.sqlite, decision)
