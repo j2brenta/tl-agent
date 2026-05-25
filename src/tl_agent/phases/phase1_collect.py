@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from collections.abc import Iterable
 from datetime import UTC, datetime, time, timedelta
 
 from tl_agent.models import (
     DailySignals,
+    Engineer,
     GitCommit,
     JiraTicket,
     StandupMessage,
@@ -125,15 +128,58 @@ async def _fetch_standups(
     out: list[StandupMessage] = []
     for m in msgs:
         engineer = next((e for e in ctx.team.engineers if e.matches(m.user_id)), None)
+        if engineer is not None:
+            out.append(
+                StandupMessage(
+                    engineer_id=engineer.id,
+                    date_iso=m.created_at.date().isoformat(),
+                    raw=m.text,
+                    chat_message_id=m.id,
+                    chat_channel_id=m.channel_id,
+                )
+            )
+            continue
+        # TL-admin (or anyone unrecognised) posted a transcript-style bulk
+        # message — split on `<Name>:` headers and emit one StandupMessage per
+        # matched engineer. Same chat_message_id so the trace points back to
+        # the same post.
+        for eid, body in _split_bulk_standup(m.text, ctx.team.engineers):
+            out.append(
+                StandupMessage(
+                    engineer_id=eid,
+                    date_iso=m.created_at.date().isoformat(),
+                    raw=body,
+                    chat_message_id=m.id,
+                    chat_channel_id=m.channel_id,
+                )
+            )
+    return out
+
+
+_HEADER_RE = re.compile(r"^\s*([A-Za-z][\w\-]*)\s*[:\-—]\s*$", re.MULTILINE)
+
+
+def _split_bulk_standup(text: str, engineers: Iterable[Engineer]) -> list[tuple[str, str]]:
+    """Split a bulk transcript into (engineer_id, body) pairs.
+
+    Matches lines like `John:` / `Matt -` / `Alicia —` as section headers.
+    A header is accepted only when the name resolves via `Engineer.matches()`;
+    other "Word:" lines (e.g. `Status:`) fall into the previous section's body.
+    """
+    eng_list = list(engineers)  # may be a generator; we iterate per header
+    headers: list[tuple[int, int, str]] = []  # (start, end, engineer_id)
+    for match in _HEADER_RE.finditer(text):
+        name = match.group(1)
+        engineer = next((e for e in eng_list if e.matches(name)), None)
         if engineer is None:
             continue
-        out.append(
-            StandupMessage(
-                engineer_id=engineer.id,
-                date_iso=m.created_at.date().isoformat(),
-                raw=m.text,
-                chat_message_id=m.id,
-                chat_channel_id=m.channel_id,
-            )
-        )
+        headers.append((match.start(), match.end(), engineer.id))
+    if not headers:
+        return []
+    out: list[tuple[str, str]] = []
+    for i, (_, body_start, eid) in enumerate(headers):
+        body_end = headers[i + 1][0] if i + 1 < len(headers) else len(text)
+        body = text[body_start:body_end].strip()
+        if body:
+            out.append((eid, body))
     return out

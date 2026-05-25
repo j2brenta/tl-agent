@@ -93,14 +93,49 @@ async def run(run_date: date | None = None) -> RunResult:
 @phase_span("orchestrator.run")
 async def _run_pipeline(ctx: RunContext) -> RunResult:
     """The actual phase chain. Separate from `run()` so tests can inject ctx."""
-    _ = await phase0_loop_closure.run(ctx)
+    # Phase boundaries are logged at INFO so `tl-agent run` (verbose by
+    # default) shows progress — the difference between "hung" and "Phase 5
+    # is running a long ReACT loop on a local model".
+    import time as _time
+
+    def _started(name: str) -> float:
+        logger.info("→ %s", name)
+        return _time.perf_counter()
+
+    def _done(name: str, t0: float) -> None:
+        logger.info("✓ %s (%.1fs)", name, _time.perf_counter() - t0)
+
+    t = _started("phase0_loop_closure")
+    await phase0_loop_closure.run(ctx)
+    _done("phase0_loop_closure", t)
+
+    t = _started("phase1_collect")
     signals = await phase1_collect.run(ctx)
+    _done("phase1_collect", t)
+
+    t = _started("phase2_triage")
     per_engineer = await phase2_triage.run(ctx, signals)
+    _done("phase2_triage", t)
+
+    t = _started("phase3_correlate")
     hotspots = await phase3_correlate.run(ctx, signals=signals, per_engineer=per_engineer)
+    _done("phase3_correlate", t)
+
+    t = _started("phase4_reconcile")
     reconciled = await phase4_reconcile.run(ctx, today_hotspots=hotspots)
+    _done("phase4_reconcile", t)
+
+    t = _started("phase5_deepdive")
     deep_dives = await phase5_deepdive.run(ctx, hotspots=reconciled.hotspots)
+    _done("phase5_deepdive", t)
+
+    t = _started("phase6_response_mode")
     drafts = await phase6_response_mode.run(ctx, deep_dives=deep_dives)
+    _done("phase6_response_mode", t)
+
+    t = _started("phase7_compose")
     brief = await phase7_compose.run(ctx, drafts=drafts, deep_dives=deep_dives)
+    _done("phase7_compose", t)
 
     open_flags = len(flags_repo.list_open_on(ctx.sqlite, ctx.run_date))
     return RunResult(

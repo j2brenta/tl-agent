@@ -1,0 +1,15 @@
+# Active prompt version per phase. The loader (`src/tl_agent/llm/prompts.py`)
+# reads `prompts/<phase>/v<N>.md` for the version listed here.
+#
+# Bumping a version is a deliberate act: write `prompts/<phase>/v(N+1).md`
+# with `parent_version` + `change_reason` frontmatter, run `make eval-quick`
+# to A/B against the prior baseline, then change the number below. The
+# previous version stays on disk so past traces remain reproducible.
+
+versions:
+  phase2_triage: 2
+  phase3_correlate: 1
+  phase5_deepdive: 1
+  phase6_response_mode: 1
+  phase7_compose: 1
+  verifier: 1

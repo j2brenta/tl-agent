@@ -37,9 +37,26 @@ def run(
         str,
         typer.Option("--date", help="ISO date for the run (defaults to today)"),
     ] = "",
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose/--quiet", help="Stream phase progress + tool calls to stderr"),
+    ] = True,
 ) -> None:
     """Run the full 8-phase tech-lead loop for the given date."""
+    import logging
+
     from tl_agent.phases.orchestrator import run as orch_run
+
+    if verbose:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)-5s %(name)s — %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        # Mute noisy third-party loggers; keep our own + warnings + the OTLP
+        # exporter (so "Failed to export span batch" still surfaces).
+        for noisy in ("httpx", "httpcore", "urllib3", "anthropic", "openai"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
 
     target = date_cls.fromisoformat(run_date) if run_date else date_cls.today()
     console.print(f"[bold]tl-agent[/bold] running for {target.isoformat()}")

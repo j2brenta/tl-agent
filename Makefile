@@ -111,8 +111,8 @@ restore: ## restore mattermost-postgres from snapshot (per-eval reset)
 
 # -------------------- run --------------------
 .PHONY: run
-run: ## run today's tech-lead loop
-	$(PYTHON) -m tl_agent.cli run --date $$(date +%F)
+run: ## run the tech-lead loop (DATE=YYYY-MM-DD overrides today)
+	$(PYTHON) -m tl_agent.cli run --date $(or $(DATE),$(shell date +%F))
 
 .PHONY: web
 web: ## start Phase 8 review UI on :8080

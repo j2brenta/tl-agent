@@ -18,11 +18,22 @@ from tl_agent.llm.prompts import load_prompt, load_prompts_config
         ("verifier", "claude-sonnet-4-6"),
     ],
 )
-def test_each_phase_has_v1(phase: str, expected_model: str) -> None:
+def test_each_phase_has_active_prompt(phase: str, expected_model: str) -> None:
+    """Active prompt (per `config/prompts.yaml`) loads and points at the right model."""
     p = load_prompt(phase)
-    assert p.version == 1
+    assert p.version >= 1
     assert p.model == expected_model
     assert len(p.body) > 100  # not a stub
+    if p.version > 1:
+        assert p.parent_version is not None, "newer versions must record their parent"
+        assert p.change_reason, "newer versions must record why they exist"
+
+
+def test_phase2_v1_still_loadable() -> None:
+    """Old versions remain reproducible — never edit-in-place; never delete."""
+    p = load_prompt("phase2_triage", version=1)
+    assert p.version == 1
+    assert len(p.body) > 100
 
 
 def test_default_versions_cover_all_phases() -> None:

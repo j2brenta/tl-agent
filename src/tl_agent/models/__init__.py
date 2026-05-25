@@ -30,6 +30,7 @@ from tl_agent.models.triage import (
     EngineerTriage,
     Evidence,
     EvidenceKind,
+    StandupExtract,
     TriageStatus,
 )
 
@@ -58,6 +59,7 @@ __all__ = [
     "PredictionOutcome",
     "ResponseDraft",
     "ResponseMode",
+    "StandupExtract",
     "StandupMessage",
     "TriageStatus",
 ]

@@ -248,20 +248,48 @@ After `make up && make seed`, the following exists:
    Copy the `admin token:` line from the seed output into
    `TLA_MATTERMOST_TOKEN` in `.env`. Confirm `TLA_ANTHROPIC_API_KEY` is set.
 
-2. **(Optional) Add today's standup.** The seed only goes through
-   `2026-05-22`. To test on a later date, log into Mattermost at
-   `http://localhost:8065` (`tl-admin` / the password from `.env`), open
-   the `town-square` channel, and post one message per engineer using
-   their account. Format:
+2. **(Optional) Add today's standup as a TL-admin transcript.** The seed
+   only goes through `2026-05-22`. To test on a later date, log into
+   Mattermost at `http://localhost:8065` (`tl-admin` / the password from
+   `.env`), open the `town-square` channel, and post **one** message
+   containing all four engineers' updates as natural prose. Phase 1
+   detects that the author isn't a known engineer and splits the body on
+   `<Name>:` headers; Phase 2 (prompt v2) extracts which sprint tickets
+   each engineer worked on, anything off-sprint, and the blockers they
+   raised. No fixed template required — write it the way you'd dictate it.
+
+   Sample message for `2026-05-26`:
    ```
-   Y: <yesterday>
-   T: <today>
-   Blockers: <text or "none">
+   Standup 2026-05-26
+
+   John:
+   Wrapped up ENG-12 yesterday — the publisher retry semantics turned
+   out to be straightforward once the rate limiter from ENG-1 was in
+   place. Today picking up ENG-19, the billing dashboard widget. No
+   blockers.
+
+   Matt:
+   Still on ENG-9 (auth events stream). The migration path is bigger
+   than I expected — touching more services than the ticket scoped for.
+   Blocked on getting schema review from the platform team; I've
+   pinged twice.
+
+   Alicia:
+   Finished ENG-4 chart refresh and got ENG-22 through review. Starting
+   ENG-7 (admin page filters) today. Risk: still waiting on design
+   feedback for the filter UX, may have to make a call without it.
+
+   Karen:
+   ENG-5 consumer wiring is done, also did a small PAY-99 cleanup in
+   the ingestion path while I was in there. Today moving to ENG-10
+   (slack notifier). No blockers.
    ```
-   Switch users via the account-switcher (top-left), or `curl` the
-   `/api/v4/posts` endpoint with each engineer's session. The Phase 1
-   collector parses `Y/T/Blockers` lines but tolerates free prose — the
-   LLM does the rest.
+
+   The parser accepts `Name:`, `Name -`, or `Name —` as the section
+   header. Names match engineer `id`, `display_name`, or any `aliases`
+   from `config/team.md`. The body of each section is free prose — Phase
+   2 reads it and populates `extract.worked_on_tickets` / `off_sprint_work`
+   (e.g. Karen's `PAY-99`) / `blockers` automatically.
 
    If you skip this step, run against `--date 2026-05-22` (the last
    seeded day) and the loop has full data.
