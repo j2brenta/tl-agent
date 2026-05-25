@@ -51,7 +51,10 @@ def init_tracing(*, service_name: str = "tl-agent", force: bool = False) -> None
 
     # Phoenix / OTLP export (best effort — never fatal if endpoint is down)
     try:
-        otlp_exporter = OTLPSpanExporter(endpoint=settings.otlp_endpoint, timeout=2)
+        otlp_exporter = OTLPSpanExporter(
+            endpoint=settings.otlp_endpoint,
+            timeout=settings.otlp_timeout_seconds,
+        )
         provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
     except Exception as exc:
         logger.warning("otlp exporter init failed: %s — continuing without remote tracing", exc)

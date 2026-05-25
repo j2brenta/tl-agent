@@ -7,6 +7,7 @@ our local SQLite rather than an external service.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import date
 from typing import ClassVar
@@ -78,7 +79,7 @@ class SearchStandupHistoryTool(BaseTool[SearchStandupIn, SearchStandupOut]):
         today = date.fromisoformat(args.today_iso) if args.today_iso else None
         rows = observations.search(
             _conn(),
-            query=args.query,
+            query=_sanitize_fts_query(args.query),
             engineer_id=args.engineer_id,
             days=args.days,
             today=today,
@@ -95,6 +96,36 @@ class SearchStandupHistoryTool(BaseTool[SearchStandupIn, SearchStandupOut]):
             for r in rows
         ]
         return SearchStandupOut(hits=hits)
+
+
+_FTS_OPERATORS = {"AND", "OR", "NOT", "NEAR"}
+_FTS_WORD_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Quote bare terms that contain FTS5-special characters.
+
+    FTS5 parses `ENG-9` as `ENG MINUS 9` and bombs with `no such column: 9`.
+    Anything containing characters outside `[A-Za-z0-9_]` must be wrapped in
+    double quotes. Operators and parens pass through untouched so callers can
+    still write `AND` / `OR` / `NOT` / `NEAR`.
+
+    If the input already contains a `"`, we assume the caller knows FTS5
+    syntax and pass it through verbatim — naive token-splitting would break
+    multi-word quoted phrases.
+    """
+    if '"' in query:
+        return query
+    out: list[str] = []
+    for raw in query.split():
+        stripped = raw.strip("()")
+        leading = raw[: len(raw) - len(raw.lstrip("("))]
+        trailing = raw[len(raw.rstrip(")")) :]
+        if not stripped or stripped.upper() in _FTS_OPERATORS or _FTS_WORD_RE.match(stripped):
+            out.append(raw)
+            continue
+        out.append(f'{leading}"{stripped}"{trailing}')
+    return " ".join(out)
 
 
 # -------------------- get_baseline --------------------

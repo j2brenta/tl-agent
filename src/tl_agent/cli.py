@@ -43,6 +43,7 @@ def run(
 
     target = date_cls.fromisoformat(run_date) if run_date else date_cls.today()
     console.print(f"[bold]tl-agent[/bold] running for {target.isoformat()}")
+    _print_router_summary()
     result = asyncio.run(orch_run(target))
 
     table = Table(title=f"Run {result.run_id} — {result.run_date.isoformat()}")
@@ -63,6 +64,55 @@ def run(
         console.print("\n[dim]notes:[/dim]")
         for n in result.notes:
             console.print(f"  - {n}")
+
+
+def _print_router_summary() -> None:
+    """Show which provider + model each phase will use, plus relevant env knobs.
+
+    Loads the same router the orchestrator will use, so the CLI banner is
+    authoritative — no risk of drift between what we print and what runs.
+    """
+    from tl_agent.llm.router import build_default
+    from tl_agent.settings import get_settings
+
+    settings = get_settings()
+    router = build_default()
+    cfg_path = router.config_path
+    cfg_label = (
+        cfg_path.relative_to(settings.repo_root)
+        if cfg_path is not None and cfg_path.is_absolute()
+        else cfg_path
+    )
+
+    console.print(f"[dim]router config:[/dim] {cfg_label}")
+    providers_in_use = {r.provider for r in router.routes.values()}
+    if "ollama" in providers_in_use:
+        console.print(
+            f"[dim]ollama:[/dim] base_url={settings.ollama_base_url} "
+            f"timeout={settings.ollama_timeout_seconds:.0f}s"
+        )
+    if "anthropic" in providers_in_use:
+        key_state = "set" if settings.anthropic_api_key else "[red]EMPTY[/red]"
+        console.print(f"[dim]anthropic:[/dim] api_key={key_state}")
+
+    table = Table(title="Router")
+    table.add_column("route")
+    table.add_column("provider")
+    table.add_column("model")
+    table.add_column("max_tokens", justify="right")
+    table.add_column("temp", justify="right")
+    table.add_column("cache_sys", justify="right")
+    for name in sorted(router.routes):
+        r = router.routes[name]
+        table.add_row(
+            name,
+            r.provider,
+            r.model,
+            str(r.max_tokens),
+            f"{r.temperature:.1f}",
+            "y" if r.cache_system else "n",
+        )
+    console.print(table)
 
 
 @app.command()

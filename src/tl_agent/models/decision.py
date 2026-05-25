@@ -39,7 +39,10 @@ class ResponseDraft(BaseModel):
     mode: ResponseMode
     target: str | None = None
     body: str = Field(min_length=1, max_length=2000)
-    rationale: str = Field(min_length=1, max_length=400)
+    # 800 (was 400): smaller local models tend to be more verbose; the
+    # rationale is for TL audit, not display, so the cap exists only to
+    # bound storage, not to enforce concision.
+    rationale: str = Field(min_length=1, max_length=800)
 
 
 class ApprovalAction(StrEnum):

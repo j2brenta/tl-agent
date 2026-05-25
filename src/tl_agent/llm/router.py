@@ -65,6 +65,7 @@ class Router:
     def __init__(self, providers: dict[str, Provider], config: RouterConfig) -> None:
         self._providers = providers
         self._config = config
+        self._config_path: Path | None = None
 
     def provider(self, name: str) -> Provider:
         try:
@@ -93,6 +94,19 @@ class Router:
         route = self.route(phase)
         return self.provider(route.provider), route
 
+    @property
+    def config_path(self) -> Path | None:
+        """Path the active config was loaded from (set by build_default)."""
+        return self._config_path
+
+    def set_config_path(self, path: Path) -> None:
+        self._config_path = path
+
+    @property
+    def routes(self) -> dict[str, ModelRoute]:
+        """All resolved (route-name → ModelRoute) entries, for introspection."""
+        return dict(self._config.routes)
+
 
 def build_default(*, config_path: Path | str | None = None) -> Router:
     """Construct providers from settings and load router config.
@@ -113,6 +127,11 @@ def build_default(*, config_path: Path | str | None = None) -> Router:
 
     providers: dict[str, Provider] = {
         "anthropic": AnthropicProvider(api_key=settings.anthropic_api_key),
-        "ollama": OllamaProvider(base_url=settings.ollama_base_url),
+        "ollama": OllamaProvider(
+            base_url=settings.ollama_base_url,
+            timeout_seconds=settings.ollama_timeout_seconds,
+        ),
     }
-    return Router(providers, config)
+    router = Router(providers, config)
+    router.set_config_path(cfg_path)
+    return router

@@ -44,6 +44,10 @@ class Settings(BaseSettings):
         default="qwen3:8b",
         description="Default model tag used by the Ollama provider when a route omits one",
     )
+    ollama_timeout_seconds: float = Field(
+        default=300.0,
+        description="Per-request HTTP timeout for Ollama calls (slow on cold loads + 8B models)",
+    )
     default_provider: Literal["anthropic", "ollama"] = "anthropic"
     router_config: str = Field(
         default="",
@@ -56,6 +60,10 @@ class Settings(BaseSettings):
 
     # observability
     otlp_endpoint: str = Field(default="http://localhost:6006/v1/traces")
+    otlp_timeout_seconds: int = Field(
+        default=10,
+        description="Per-batch OTLP export timeout; 2s is too tight when the host is busy",
+    )
     enable_jsonl_sink: bool = True
     # When true, openinference-instrumentation-anthropic emits LLM I/O spans
     # (request messages, system prompt, response text, tool_uses) so Phoenix
