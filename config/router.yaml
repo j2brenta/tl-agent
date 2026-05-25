@@ -7,6 +7,10 @@
 #   cheap     → Haiku-tier for narrow, parallel pattern-match (Phase 2 triage)
 #   balanced  → Sonnet-tier for cross-correlate / response-mode / compose
 #   deep      → Opus-tier for the ReACT deep-dive (Phase 5) and verifier
+#
+# To run the whole pipeline on a local model instead, set
+#   TLA_ROUTER_CONFIG=config/router.ollama.yaml
+# in .env — that file mirrors this one but points every route at Ollama.
 
 default_tier: balanced
 
@@ -75,11 +79,3 @@ routes:
     max_tokens: 1024
     temperature: 0.0
     cache_system: false
-
-  # Offline / local fallback — uncomment and flip 'provider' on the routes
-  # above to A/B against a local model during prompt iteration.
-  # local_balanced:
-  #   provider: ollama
-  #   model: llama3.1:70b
-  #   max_tokens: 2048
-  #   temperature: 0.0

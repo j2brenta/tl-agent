@@ -1,0 +1,77 @@
+# Ollama-only router profile — every route resolves to a local qwen3:8b.
+#
+# Activate by setting `TLA_ROUTER_CONFIG=config/router.ollama.yaml` in .env;
+# `Router.build_default()` picks this file up at startup.
+#
+# Caveats:
+#   - Phase 5 ReACT was tuned on Opus 4.7 reasoning depth; expect more
+#     premature stops on the local model. The verifier still guards
+#     success-claim hallucinations, but quality drops.
+#   - Anthropic prompt-caching does not apply; `cache_system: false` everywhere.
+#   - `ollama pull qwen3:8b` (or whatever TLA_OLLAMA_MODEL points at) first.
+
+default_tier: balanced
+
+routes:
+  cheap:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: false
+
+  balanced:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 2048
+    temperature: 0.0
+    cache_system: false
+
+  deep:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 4096
+    temperature: 0.0
+    cache_system: false
+
+  phase2_triage:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: false
+
+  phase3_correlate:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 2048
+    temperature: 0.0
+    cache_system: false
+
+  phase5_deepdive:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 4096
+    temperature: 0.0
+    cache_system: false
+
+  phase6_response_mode:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: false
+
+  phase7_compose:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 2048
+    temperature: 0.2
+    cache_system: false
+
+  verifier:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 1024
+    temperature: 0.0
+    cache_system: false

@@ -102,7 +102,13 @@ def build_default(*, config_path: Path | str | None = None) -> Router:
     only on use).
     """
     settings = get_settings()
-    cfg_path = Path(config_path) if config_path else settings.config_dir / "router.yaml"
+    if config_path is not None:
+        cfg_path = Path(config_path)
+    elif settings.router_config:
+        override = Path(settings.router_config)
+        cfg_path = override if override.is_absolute() else settings.repo_root / override
+    else:
+        cfg_path = settings.config_dir / "router.yaml"
     config = RouterConfig.load(cfg_path)
 
     providers: dict[str, Provider] = {

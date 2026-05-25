@@ -104,7 +104,8 @@ Default chat provider is Mattermost. To switch, set
 
 ### Local-only knobs (no token to fetch)
 
-- `TLA_OLLAMA_BASE_URL` — only consulted when the router routes a phase to Ollama; install Ollama locally and `ollama pull <model>`.
+- `TLA_OLLAMA_BASE_URL` + `TLA_OLLAMA_MODEL` — only consulted when a route picks `provider: ollama`. Default model is `qwen3:8b`; install Ollama locally and `ollama pull qwen3:8b` before first use.
+- `TLA_ROUTER_CONFIG` — pick which router YAML to load. Empty → `config/router.yaml` (Anthropic). Set to `config/router.ollama.yaml` to run every phase on local `qwen3:8b` without touching the default router. No code or YAML edits required to flip back.
 - `TLA_OTLP_ENDPOINT` — Phoenix runs in compose; set empty to disable remote tracing.
 - `TLA_GITLAB_IMAGE` — uncomment on Apple Silicon to use the community arm64 build.
 
@@ -208,6 +209,106 @@ failure mode. If you outgrow it, the swap is behind `IdempotencyLookup` in
 
 ---
 
+## Running a test end-to-end
+
+The fastest way to exercise the full 8-phase loop against the real compose
+stack. Everything below uses the seeded fixtures; no production tokens needed
+besides `TLA_ANTHROPIC_API_KEY`.
+
+### What's in the seeded setup
+
+After `make up && make seed`, the following exists:
+
+- **Team** — `john`, `matt`, `alicia`, `karen` in the `engineering` team.
+- **Mattermost** at `http://localhost:8065` — channel `town-square` already 
+  contains 7 days of standups (2026-05-16 → 2026-05-22) for all four
+  engineers. The seed script prints the admin bearer token; that becomes
+  `TLA_MATTERMOST_TOKEN`.
+- **Jira mock** at `http://localhost:9100` — one active sprint with tickets
+  `ENG-1`..`ENG-N` assigned across the four engineers, including a
+  deliberate cross-engineer blocker (`ENG-9` blocks `ENG-12`) and an
+  off-sprint commit scenario. Any non-empty bearer is accepted
+  (`dev-token` is fine).
+- **GitLab CE** at `http://localhost:8929` — one project with commits in the
+  yesterday-12pm → today-12pm window, some referencing sprint tickets in
+  their message (`ENG-12: …`), some not (the off-sprint signal).
+- **SQLite** at `data/tl_agent.db` — schema applied, `engineer_baselines`
+  populated so Phase 2 doesn't flag baseline behaviours as anomalies.
+- **Phoenix** at `http://localhost:6006` — receives OTel spans from every
+  phase / tool / LLM call as the run executes.
+
+### Step-by-step
+
+1. **Bring it up.**
+   ```bash
+   make up && make seed
+   ```
+   Copy the `admin token:` line from the seed output into
+   `TLA_MATTERMOST_TOKEN` in `.env`. Confirm `TLA_ANTHROPIC_API_KEY` is set.
+
+2. **(Optional) Add today's standup.** The seed only goes through
+   `2026-05-22`. To test on a later date, log into Mattermost at
+   `http://localhost:8065` (`tl-admin` / the password from `.env`), open
+   the `town-square` channel, and post one message per engineer using
+   their account. Format:
+   ```
+   Y: <yesterday>
+   T: <today>
+   Blockers: <text or "none">
+   ```
+   Switch users via the account-switcher (top-left), or `curl` the
+   `/api/v4/posts` endpoint with each engineer's session. The Phase 1
+   collector parses `Y/T/Blockers` lines but tolerates free prose — the
+   LLM does the rest.
+
+   If you skip this step, run against `--date 2026-05-22` (the last
+   seeded day) and the loop has full data.
+
+3. **Run the loop.**
+   ```bash
+   uv run python -m tl_agent.cli run --date 2026-05-22
+   ```
+   Or `make run` for today. The CLI prints a Rich table of per-phase
+   counters plus every drafted decision with its mode and body preview.
+   Full LLM I/O lands in `traces/2026-05-22/spans.jsonl`.
+
+4. **Review the brief and decisions.**
+   ```bash
+   make web
+   ```
+   - `http://localhost:8080/brief` — top hot spots, evidence links,
+     days-hot counters.
+   - `http://localhost:8080/decisions` — every Phase 6 draft (mode + body
+     + rationale). Approve / reject / edit-then-approve via the buttons;
+     HTMX swaps the card in place.
+
+5. **Watch it execute.** Approving a `DM` or `STANDUP` decision triggers
+   Phase 8: it posts to Mattermost, then reads the post back to confirm
+   it landed (the verifier — `src/tl_agent/agent/verifier.py`). The
+   result updates the card and writes a `decisions` row with the final
+   outcome.
+
+6. **Inspect after the run.**
+   ```bash
+   sqlite3 data/tl_agent.db "select date, type, status, days_hot from daily_flags order by date desc limit 20;"
+   sqlite3 data/tl_agent.db "select date, proposed_mode, hotspot_id, substr(proposed_body,1,80) from decisions order by created_at desc;"
+   open http://localhost:6006   # Phoenix — per-phase spans, token counts, latencies
+   ```
+
+### Reset between runs
+
+```bash
+make reset-state
+```
+
+Deletes `data/tl_agent.db`, re-applies `schema.sql`, then re-seeds Jira mock
+/ GitLab / Mattermost baselines and SQLite engineer baselines. Use this
+between test runs so `days_hot` counters and the decisions log start fresh.
+To also wipe Mattermost / GitLab volumes themselves, `make nuke && make up
+&& make seed`.
+
+---
+
 ## Test plan
 
 ```
@@ -239,6 +340,44 @@ alongside `prompts/phase5_deepdive/v1.md`'s "hard rules" section.
 
 Reconstruct any run from `traces/YYYY-MM-DD/spans.jsonl` (grep-friendly) or
 the Phoenix UI at `localhost:6006`.
+
+
+# Where to see memory
+Layer 1 — config (markdown/yaml, loaded fresh every run):
+config/team.md  ownership.md  escalation.md  tl_preferences.md  router.yaml
+Just cat them. These are the "facts" — team roster, ownership, escalation rules, model routing.
+
+Layer 2 — SQLite (durable state): schema at src/tl_agent/storage/schema.sql. Tables:
+- daily_flags — yesterday's hot spots + days_hot counter
+- standup_observations — raw + summary, FTS5-indexed (this is what Phase 5's search_standup_history queries)
+- engineer_baselines — rolling per-engineer profile (so Maria's terseness isn't a red flag)
+- ticket_snapshots — Jira state captured each run
+- predictions — "I said X would resolve by Y" / outcome
+- decisions — Phase 6's output (mode + body + rationale), Phase 8's approval action
+
+Quick peek:
+sqlite3 <db-path> ".tables"
+sqlite3 <db-path> "select date, engineer_id, type, status, days_hot from daily_flags order by date desc limit 20;"
+sqlite3 <db-path> "select date, proposed_mode, hotspot_id, substr(proposed_body,1,80) from decisions order by created_at desc limit 20;"
+sqlite3 <db-path> "select date, engineer_id, substr(summary,1,120) from standup_observations order by date desc limit 20;"
+
+Per-run working context (ephemeral): src/tl_agent/storage/working_context.py — the thing each phase reads/writes between phases within one run. Not persisted as
+"memory"; it's the in-flight bundle.
+
+Phase 6 decisions specifically (your earlier question): yes — they are persisted. phase6_response_mode.py produces ResponseDraft (mode + body + rationale);
+phase7_compose.py rolls them into the brief and storage/repos/decisions.py::insert writes them to the decisions table. The web UI already surfaces them at GET
+/decisions (src/tl_agent/web/routes/decisions.py) and GET /brief. The rationale field is on the model — if the template doesn't render it yet, that's a one-line
+template edit in templates/_decision_card.html, not a missing pipeline step.
+
+LLM I/O (the "what did the model actually see and say"): that's traces, not memory — traces/YYYY-MM-DD/spans.jsonl or Phoenix at localhost:6006 (make trace). Every
+phase_span / tool_span / llm_span lands there with inputs, outputs, tokens, latency.
+
+On the broader testing-flow asks from your earlier message — three small gaps vs. what's there now:
+- tl-agent run --date YYYY-MM-DD already exists (src/tl_agent/cli.py:36). For the web side, there's no kickoff route yet — you'd add POST /runs (taking date + pasted
+standup_text) to src/tl_agent/web/routes/ and stream phase progress to stdout via the existing logger.
+- Clean-slate reset: make nuke tears compose volumes; make seed re-seeds. M
+- SQLite state file — make reset-state deletes the DB file and re-runs storage/schema.sql, then make seed.
+
 
 ---
 

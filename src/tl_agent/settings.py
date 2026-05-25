@@ -40,7 +40,19 @@ class Settings(BaseSettings):
     # llm
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
     ollama_base_url: str = Field(default="http://localhost:11434/v1")
+    ollama_model: str = Field(
+        default="qwen3:8b",
+        description="Default model tag used by the Ollama provider when a route omits one",
+    )
     default_provider: Literal["anthropic", "ollama"] = "anthropic"
+    router_config: str = Field(
+        default="",
+        description=(
+            "Override path for the router YAML (relative to repo root or absolute). "
+            "Empty → config/router.yaml. Set to config/router.ollama.yaml to run "
+            "the whole pipeline on a local model."
+        ),
+    )
 
     # observability
     otlp_endpoint: str = Field(default="http://localhost:6006/v1/traces")
