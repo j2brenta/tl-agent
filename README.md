@@ -1,6 +1,6 @@
 # tl-agent — Tech-Lead Agentic Workflow
 
-A production-grade agent that runs an 8-phase morning loop for a tech lead
+A production-grade agent that runs an 8-phase morning loop for a team lead
 over a team of four (John, Matt, Alicia, Karen): collects Jira/GitLab/standup
 signals, triages each engineer, cross-correlates, deep-dives uncertain hot
 spots with a ReACT loop, picks a response mode, drafts artifacts, and
@@ -22,7 +22,7 @@ make up && make seed       # compose up + seed gitlab/mattermost/jira_mock
 make snapshot              # capture post-seed baseline for evals
 make check                 # ruff + mypy strict + pyright + unit tests
 make eval-quick            # 5 hand-curated scenarios (no API key needed)
-make run                   # tech-lead loop for today (needs ANTHROPIC_API_KEY)
+make run                   # team-lead loop for today (needs ANTHROPIC_API_KEY)
 make web                   # review UI on :8080
 make trace                 # Phoenix span viewer on :6006
 ```
