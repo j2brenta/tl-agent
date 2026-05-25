@@ -38,11 +38,16 @@ async def run(ctx: RunContext, *, deep_dives: list[DeepDive]) -> list[ResponseDr
         return []
     prompt = load_prompt("phase6_response_mode")
     provider, route = ctx.router.for_phase("phase6_response_mode")
-    deep_route_pair: tuple[Provider, ModelRoute] | None
-    try:
-        deep_route_pair = ctx.router.for_phase("deep")
-    except RuntimeError:
-        deep_route_pair = None
+    # Escalation target: prefer an explicit `phase6_escalation` route (Opus
+    # in our default + lite configs), then explicit `deep`. We check
+    # `router.routes` directly so the lookup doesn't silently fall back to
+    # `default_tier` — in single-tier profiles the equality check below
+    # would then turn escalation into a no-op anyway, but explicit is clearer.
+    deep_route_pair: tuple[Provider, ModelRoute] | None = None
+    for key in ("phase6_escalation", "deep"):
+        if key in ctx.router.routes:
+            deep_route_pair = ctx.router.for_phase(key)
+            break
     escalation_rules = load_markdown("escalation.md")
 
     drafts: list[ResponseDraft] = []

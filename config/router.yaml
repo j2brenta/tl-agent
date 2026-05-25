@@ -62,7 +62,19 @@ routes:
   phase6_response_mode:
     provider: anthropic
     model: claude-sonnet-4-6
-    max_tokens: 512
+    # body up to 2000 chars + rationale up to 1500 + JSON overhead = ~1500
+    # tokens worst case. 512 truncates the tool-use call mid-emission and
+    # drops the `rationale` field.
+    max_tokens: 1500
+    temperature: 0.0
+    cache_system: true
+
+  # Opus escalation for Phase 6 — only fires when the primary call returns
+  # an invalid ResponseDraft. One Opus call per salvaged hotspot.
+  phase6_escalation:
+    provider: anthropic
+    model: claude-opus-4-7
+    max_tokens: 2000
     temperature: 0.0
     cache_system: true
 

@@ -118,6 +118,14 @@ run: ## run the tech-lead loop (DATE=YYYY-MM-DD overrides today)
 web: ## start Phase 8 review UI on :8080
 	uv run uvicorn tl_agent.web.app:app --reload --host 0.0.0.0 --port 8080
 
+.PHONY: demo
+demo: ## end-to-end demo (up + seed + post standup + run); DATE= overrides
+	@scripts/demo_run.sh $(if $(DATE),$(DATE),)
+
+.PHONY: demo-fresh
+demo-fresh: ## like `make demo` but wipes SQLite state first
+	@scripts/demo_run.sh --reset $(if $(DATE),$(DATE),)
+
 .PHONY: trace
 trace: ## open Phoenix UI in browser
 	@open http://localhost:6006 || xdg-open http://localhost:6006

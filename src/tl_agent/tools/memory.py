@@ -103,29 +103,51 @@ _FTS_WORD_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def _sanitize_fts_query(query: str) -> str:
-    """Quote bare terms that contain FTS5-special characters.
+    """Quote bare terms containing FTS5-special characters.
 
     FTS5 parses `ENG-9` as `ENG MINUS 9` and bombs with `no such column: 9`.
     Anything containing characters outside `[A-Za-z0-9_]` must be wrapped in
-    double quotes. Operators and parens pass through untouched so callers can
-    still write `AND` / `OR` / `NOT` / `NEAR`.
+    double quotes. Operators (AND/OR/NOT/NEAR) and parens pass through.
 
-    If the input already contains a `"`, we assume the caller knows FTS5
-    syntax and pass it through verbatim — naive token-splitting would break
-    multi-word quoted phrases.
+    Quote-aware: the LLM routinely mixes quoted phrases with bare hyphenated
+    ticket keys in one query (e.g. `ENG-19 OR "billing dashboard"`). We walk
+    the string instead of a blanket split so existing `"..."` phrases pass
+    through untouched while bare `ENG-19` between them gets quoted.
     """
-    if '"' in query:
-        return query
     out: list[str] = []
-    for raw in query.split():
-        stripped = raw.strip("()")
-        leading = raw[: len(raw) - len(raw.lstrip("("))]
-        trailing = raw[len(raw.rstrip(")")) :]
-        if not stripped or stripped.upper() in _FTS_OPERATORS or _FTS_WORD_RE.match(stripped):
-            out.append(raw)
+    i = 0
+    n = len(query)
+    while i < n:
+        ch = query[i]
+        if ch.isspace():
+            out.append(ch)
+            i += 1
             continue
-        out.append(f'{leading}"{stripped}"{trailing}')
-    return " ".join(out)
+        if ch == '"':
+            # copy the whole quoted phrase, including the closing quote
+            j = query.find('"', i + 1)
+            if j == -1:
+                # unterminated quote — treat the rest as one phrase
+                out.append(query[i:])
+                break
+            out.append(query[i : j + 1])
+            i = j + 1
+            continue
+        if ch in "()":
+            out.append(ch)
+            i += 1
+            continue
+        # bare token — read until whitespace, paren, or quote
+        j = i
+        while j < n and not query[j].isspace() and query[j] not in '()"':
+            j += 1
+        token = query[i:j]
+        i = j
+        if token.upper() in _FTS_OPERATORS or _FTS_WORD_RE.match(token):
+            out.append(token)
+        else:
+            out.append(f'"{token}"')
+    return "".join(out)
 
 
 # -------------------- get_baseline --------------------

@@ -62,7 +62,21 @@ routes:
   phase6_response_mode:
     provider: anthropic
     model: claude-sonnet-4-6
-    max_tokens: 512
+    # body up to 2000 chars + rationale up to 1500 + JSON overhead = ~1500
+    # tokens worst case. 512 was getting truncated mid-emission, dropping
+    # the `rationale` field and triggering the salvage path.
+    max_tokens: 1500
+    temperature: 0.0
+    cache_system: true
+
+  # Escalation target for Phase 6 when the primary call fails validation.
+  # Looked up before the generic `deep` route. Keep this on Opus even in
+  # the "light" profile — cost is one Opus call per salvaged hotspot, not
+  # per run, and only triggered on actual failure.
+  phase6_escalation:
+    provider: anthropic
+    model: claude-opus-4-7
+    max_tokens: 2000
     temperature: 0.0
     cache_system: true
 
