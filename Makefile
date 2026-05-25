@@ -91,7 +91,10 @@ seed: ## seed GitLab + Jira mock + Mattermost + SQLite baselines
 	$(PYTHON) -m services.jira_mock.seed
 	$(PYTHON) -m services.mattermost_seed.seed
 	bash infra/gitlab/seed.sh
-	$(PYTHON) -m tl_agent.storage.db --init
+	$(PYTHON) -m tl_agent.cli init-db
+	@# jira_mock loads fixtures at module import; restart so new state takes effect.
+	@# Safe no-op when the container isn't running.
+	@$(COMPOSE) restart jira_mock 2>/dev/null || true
 
 .PHONY: reset-state
 reset-state: ## wipe SQLite state, re-apply schema, then re-seed

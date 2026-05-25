@@ -115,6 +115,29 @@ def _print_router_summary() -> None:
     console.print(table)
 
 
+@app.command(name="init-db")
+def init_db(
+    db_path: Annotated[
+        str,
+        typer.Option("--path", help="override DB path (defaults to settings.sqlite_path)"),
+    ] = "",
+) -> None:
+    """Apply schema.sql to the SQLite DB, creating it if missing (idempotent)."""
+    from pathlib import Path
+
+    from tl_agent.settings import get_settings
+    from tl_agent.storage.db import connect, initialize
+
+    target = Path(db_path) if db_path else get_settings().sqlite_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect(target)
+    try:
+        initialize(conn)
+    finally:
+        conn.close()
+    console.print(f"[green]initialised SQLite at {target}[/green]")
+
+
 @app.command()
 def reset(
     confirm: Annotated[

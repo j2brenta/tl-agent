@@ -228,7 +228,9 @@ After `make up && make seed`, the following exists:
   `ENG-1`..`ENG-N` assigned across the four engineers, including a
   deliberate cross-engineer blocker (`ENG-9` blocks `ENG-12`) and an
   off-sprint commit scenario. Any non-empty bearer is accepted
-  (`dev-token` is fine).
+  (`dev-token` is fine). Fixtures are bind-mounted from
+  `services/jira_mock/fixtures/state.json`; `make seed` rewrites that file
+  and restarts the container so the new state lands without a rebuild.
 - **GitLab CE** at `http://localhost:8929` — one project with commits in the
   yesterday-12pm → today-12pm window, some referencing sprint tickets in
   their message (`ENG-12: …`), some not (the off-sprint signal).

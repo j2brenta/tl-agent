@@ -103,8 +103,12 @@ services:
       - "9100:9100"
     environment:
       JIRA_MOCK_PORT: "9100"
-    # NB: no volume mount — files are COPYed into the image. A bind mount
-    # here would mask /app and break the entrypoint.
+    # Bind-mount JUST the fixtures file (not a whole dir) so `make seed` /
+    # host-side edits land in the running container without a rebuild. We
+    # avoid mounting /app or /app/fixtures wholesale — that would mask the
+    # COPYed app.py / seed.py and break the entrypoint.
+    volumes:
+      - ../services/jira_mock/fixtures/state.json:/app/fixtures/state.json:ro
     healthcheck:
       # python:3.12-slim has no curl/wget; use stdlib urllib instead.
       test:
