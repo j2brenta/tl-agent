@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse
 from tl_agent.obs.tracing import init_tracing
 from tl_agent.web.routes import decisions as decisions_route
 from tl_agent.web.routes import review as review_route
+from tl_agent.web.routes import sprint as sprint_route
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ async def root() -> HTMLResponse:
 # Wire the routers
 app.include_router(review_route.router)
 app.include_router(decisions_route.router)
+app.include_router(sprint_route.router)
 
 
 @app.get("/healthz")

@@ -1,0 +1,188 @@
+{% extends "_base.html" %}
+{% block title %}Sprint — {{ selected_date or "no data" }}{% endblock %}
+
+{% block body %}
+<h1>Sprint status{% if sprint_name %} · <span style="font-weight:400;color:#555">{{ sprint_name }}</span>{% endif %}</h1>
+
+<form method="get" style="margin-bottom:12px">
+  <label>Run date: <input type="date" name="date" value="{{ selected_date or '' }}"></label>
+  <button type="submit">go</button>
+  {% if selected_date %}<a href="?" style="margin-left:8px">latest</a>{% endif %}
+</form>
+
+{% if available_dates %}
+<p style="margin:-4px 0 16px;font-size:12px;color:#555">
+  {% for d in available_dates[:10] %}
+    <a href="?date={{ d }}" {% if d == selected_date %}style="font-weight:600"{% endif %}>{{ d }}</a>{% if not loop.last %} · {% endif %}
+  {% endfor %}
+  {% if available_dates|length > 10 %}<span style="color:#888">(+{{ available_dates|length - 10 }} older)</span>{% endif %}
+</p>
+{% endif %}
+
+{% if no_data %}
+<p>No sprint data yet. Run <code>tl-agent run</code> to populate.</p>
+{% else %}
+
+{# ── Sprint summary bar ── #}
+<div class="card" style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;padding:10px 16px;margin-bottom:20px">
+  <div><span style="font-size:22px;font-weight:700">{{ done_total }}/{{ total }}</span> <span style="color:#555;font-size:12px">tickets done</span></div>
+  <div style="flex:1;min-width:160px">
+    <div style="background:#eee;border-radius:4px;height:8px;overflow:hidden">
+      <div style="background:#2da44e;height:100%;width:{{ ((done_total/total)*100)|round|int if total else 0 }}%"></div>
+    </div>
+    <div style="font-size:11px;color:#555;margin-top:3px">{{ ((done_total/total)*100)|round|int if total else 0 }}% complete</div>
+  </div>
+  {% if planned_pts > 0 %}
+  <div><span style="font-size:16px;font-weight:600">{{ done_pts|round(1) }}</span><span style="color:#555;font-size:12px"> / {{ planned_pts|round(1) }} pts</span></div>
+  {% endif %}
+  <div style="display:flex;gap:10px;font-size:12px">
+    {% if in_progress_total %}<span style="background:#ddf4ff;padding:2px 8px;border-radius:3px">{{ in_progress_total }} in progress</span>{% endif %}
+    {% if in_review_total %}<span style="background:#f3f0ff;padding:2px 8px;border-radius:3px">{{ in_review_total }} in review</span>{% endif %}
+    {% if blocked_total %}<span style="background:#ffe6e6;padding:2px 8px;border-radius:3px;color:#800">{{ blocked_total }} blocked</span>{% endif %}
+  </div>
+</div>
+
+{# ── Per-engineer panels ── #}
+{% for row in engineers %}
+{% set eng = row.engineer %}
+<div class="card" style="margin-bottom:16px;padding:14px 16px">
+  <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+    <strong style="font-size:15px">{{ eng.display_name }}</strong>
+    <span style="font-size:11px;color:#888">{{ eng.role }}</span>
+    {% if row.on_track %}
+      <span style="background:#e6ffec;color:#1a7f37;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">on track</span>
+    {% else %}
+      <span style="background:#ffe6e6;color:#800;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">needs attention</span>
+    {% endif %}
+    <span style="margin-left:auto;font-size:12px;color:#888">
+      {{ row.done_count }}/{{ row.tickets|length }} tickets done
+      {% if row.blocked_count %} · <span style="color:#c00">{{ row.blocked_count }} blocked</span>{% endif %}
+    </span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+    {# Standup #}
+    <div>
+      <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Standup</div>
+      {% if row.observation %}
+        {% if row.observation.summary %}
+          <div style="font-size:13px;font-style:italic;color:#444;margin-bottom:6px">{{ row.observation.summary }}</div>
+        {% endif %}
+        <details>
+          <summary style="font-size:12px;color:#555;cursor:pointer">raw message</summary>
+          <pre style="font-size:12px;white-space:pre-wrap;margin:4px 0;padding:8px;background:#f6f8fa;border-radius:4px">{{ row.observation.raw }}</pre>
+        </details>
+      {% else %}
+        <span style="color:#aaa;font-size:13px">no standup on record</span>
+      {% endif %}
+    </div>
+
+    {# Tickets #}
+    <div>
+      <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Sprint tickets</div>
+      {% if row.tickets %}
+        <table style="font-size:12px">
+          {% for t in row.tickets %}
+          <tr>
+            <td style="color:#555;padding-right:8px;white-space:nowrap">{{ t.key }}</td>
+            <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ t.summary }}">{{ t.summary }}</td>
+            <td style="padding-left:8px;white-space:nowrap">
+              {% set s = t.status.value %}
+              {% if s == 'done' %}<span style="background:#e6ffec;color:#1a7f37;padding:1px 6px;border-radius:3px">done</span>
+              {% elif s == 'blocked' %}<span style="background:#ffe6e6;color:#800;padding:1px 6px;border-radius:3px">blocked</span>
+              {% elif s == 'in_review' %}<span style="background:#f3f0ff;color:#5a3e9b;padding:1px 6px;border-radius:3px">review</span>
+              {% elif s == 'in_progress' %}<span style="background:#ddf4ff;color:#0550ae;padding:1px 6px;border-radius:3px">in prog</span>
+              {% else %}<span style="background:#f0f0f0;color:#555;padding:1px 6px;border-radius:3px">{{ s }}</span>
+              {% endif %}
+            </td>
+            {% if t.points %}<td style="padding-left:6px;color:#888;font-size:11px">{{ t.points|round(0)|int }}pt</td>{% endif %}
+          </tr>
+          {% endfor %}
+        </table>
+      {% else %}
+        <span style="color:#aaa;font-size:13px">no tickets assigned</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Flags for this engineer #}
+  {% if row.flags %}
+  <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Flags</div>
+    {% for flag in row.flags %}
+    <div style="font-size:12px;margin-bottom:3px;display:flex;align-items:baseline;gap:8px">
+      {% if flag.days_hot >= 3 %}
+        <span style="color:#c00;font-weight:600">⚑</span>
+      {% elif flag.days_hot >= 2 %}
+        <span style="color:#c97a00;font-weight:600">⚑</span>
+      {% else %}
+        <span style="color:#888">⚑</span>
+      {% endif %}
+      <span>{{ flag.title }}</span>
+      <span style="color:#aaa">({{ flag.type.value.replace("_"," ") }} · {{ flag.days_hot }}d)</span>
+      {% if flag.related_ticket_ids %}
+        <span style="color:#888">→ {{ flag.related_ticket_ids|join(", ") }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+{% endfor %}
+
+{# ── Team-wide flags ── #}
+{% if team_flags %}
+<div class="card" style="margin-bottom:16px">
+  <strong>Team-wide flags</strong>
+  {% for flag in team_flags %}
+  <div style="font-size:13px;margin:6px 0;display:flex;gap:8px;align-items:baseline">
+    <span style="color:#c97a00;font-weight:600">⚑</span>
+    <span>{{ flag.title }}</span>
+    <span style="color:#aaa;font-size:11px">({{ flag.type.value.replace("_"," ") }} · {{ flag.days_hot }}d)</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Off-sprint / unplanned work ── #}
+{% if off_sprint_flags or unplanned_tickets %}
+<div class="card" style="border-color:#c97a00;border-width:2px;background:#fffbe6">
+  <strong style="font-size:14px">Unplanned work</strong>
+
+  {% if unplanned_tickets %}
+  <div style="margin-top:8px">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Tickets added mid-sprint</div>
+    <table style="font-size:12px">
+      {% for t in unplanned_tickets %}
+      <tr>
+        <td style="color:#555;padding-right:8px;white-space:nowrap">{{ t.key }}</td>
+        <td>{{ t.summary }}</td>
+        <td style="padding-left:8px;color:#888;white-space:nowrap">{{ t.assignee or "—" }}</td>
+        {% if t.points %}<td style="padding-left:6px;color:#888;font-size:11px">{{ t.points|round(0)|int }}pt</td>{% endif %}
+        <td style="padding-left:8px;color:#aaa;font-size:11px">added {{ t.added_to_sprint_at.strftime("%Y-%m-%d") if t.added_to_sprint_at else "" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  {% if off_sprint_flags %}
+  <div style="margin-top:{% if unplanned_tickets %}10{% else %}8{% endif %}px">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:4px">Off-sprint signals</div>
+    {% for flag in off_sprint_flags %}
+    <div style="font-size:12px;margin-bottom:3px;display:flex;gap:8px;align-items:baseline">
+      <span style="color:#c97a00;font-weight:600">⚑</span>
+      <span>{{ flag.title }}</span>
+      {% if flag.engineer_id %}<span style="color:#888">{{ flag.engineer_id }}</span>{% endif %}
+      <span style="color:#aaa">({{ flag.days_hot }}d)</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endif %}{# end no_data #}
+{% endblock %}
