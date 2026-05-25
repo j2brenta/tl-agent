@@ -1,7 +1,7 @@
 [project]
 name = "tl-agent"
 version = "0.1.0"
-description = "Tech-lead agentic workflow — 8-phase morning loop with production scaffolding"
+description = "Team lead agentic workflow — 8-phase morning loop with production scaffolding"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }

@@ -36,10 +36,13 @@ logger = logging.getLogger(__name__)
 @phase_span("phase1_collect")
 async def run(ctx: RunContext) -> DailySignals:
     """Run all four fetches in parallel and assemble the envelope."""
-    # Window: yesterday 12pm UTC → today 12pm UTC (per plan).
+    # Window: yesterday midnight UTC → end of today (midnight tomorrow UTC).
+    # Using midnight boundaries instead of noon-to-noon means demo seeds run
+    # at any time of day still land inside the window (GitLab's Commits API
+    # always stamps committed_date with wall-clock time; it ignores author_date).
     today = ctx.run_date
-    until = datetime.combine(today, time(12, 0), tzinfo=UTC)
-    since = until - timedelta(days=1)
+    until = datetime.combine(today + timedelta(days=1), time(0, 0), tzinfo=UTC)
+    since = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
 
     sprint_task = _fetch_sprint(ctx)
     commits_task = _fetch_commits(ctx, since, until)

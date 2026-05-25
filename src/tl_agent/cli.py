@@ -18,7 +18,7 @@ from tl_agent import __version__
 
 app = typer.Typer(
     name="tl-agent",
-    help="Tech-lead agentic workflow",
+    help="Team lead agentic workflow",
     no_args_is_help=True,
     add_completion=False,
 )

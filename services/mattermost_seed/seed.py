@@ -73,7 +73,38 @@ def _ensure_admin(client: httpx.Client) -> str:
         json={"login_id": ADMIN_USER, "password": ADMIN_PW},
     )
     login.raise_for_status()
-    return str(login.headers.get("Token", ""))
+    session_token = str(login.headers.get("Token", ""))
+
+    # Return a Personal Access Token so callers don't get session-expiry 401s.
+    # Session tokens have a short TTL; PATs are long-lived.
+    authed = {"Authorization": f"Bearer {session_token}"}
+    user_id = client.get("/api/v4/users/me", headers=authed).json()["id"]
+
+    # Revoke any existing tl-agent PAT so we can re-issue and read the plaintext.
+    existing = client.get(f"/api/v4/users/{user_id}/tokens", headers=authed)
+    if existing.status_code == 200:
+        for tok in existing.json():
+            if tok.get("description") == "tl-agent":
+                client.delete(f"/api/v4/users/{user_id}/tokens/{tok['id']}", headers=authed)
+                break
+
+    pat = client.post(
+        f"/api/v4/users/{user_id}/tokens",
+        headers=authed,
+        json={"description": "tl-agent"},
+    )
+    if pat.status_code == 200:
+        return str(pat.json()["token"])
+
+    # PATs not enabled (MM_SERVICESETTINGS_ENABLEUSERAPITOKEN not set) — fall
+    # back to the session token and warn so the operator knows to enable it.
+    print(
+        "WARNING: PAT creation returned HTTP "
+        f"{pat.status_code} — falling back to session token (will expire). "
+        "Set MM_SERVICESETTINGS_ENABLEUSERAPITOKEN=true in docker-compose.yml.",
+        file=sys.stderr,
+    )
+    return session_token
 
 
 def _ensure_team(client: httpx.Client) -> str:

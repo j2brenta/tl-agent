@@ -8,18 +8,17 @@ only reads the diff stats, not the actual file contents.
 - The first run creates commits at the path `seed/<sha>.txt` on each
   feature branch; subsequent runs hit the 400/409 check and skip.
 - Passing `--anchor-date YYYY-MM-DD` namespaces the path under
-  `seed/<anchor>/<sha>.txt` and the branch as `<branch>-<anchor>`. The
-  commits are backdated to `anchor_date - 1 day` at 18:00 UTC so they fall
-  inside Phase 1's fetch window of `[run_date-1 12:00 UTC, run_date 12:00 UTC]`
-  regardless of when this script is actually run. Old anchored commits stay
-  around for replay.
+  `seed/<anchor>/<sha>.txt` and the branch as `<branch>-<anchor>`, forcing
+  fresh commits per anchor. GitLab's Commits API always stamps committed_date
+  with wall-clock time (author_date/commit_date fields are ignored), so Phase 1
+  uses a midnight-to-midnight window over run_date to capture seed commits
+  regardless of when the seed runs.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -54,28 +53,12 @@ def main() -> None:
     base = args.gitlab_url.rstrip("/")
     project_quoted = args.project.replace("/", "%2F")
 
-    commit_timestamp = ""
     if args.anchor_date:
-        anchor = date.fromisoformat(args.anchor_date)
-        commit_timestamp = datetime(anchor.year, anchor.month, anchor.day, tzinfo=UTC).replace(
-            hour=18
-        ) - timedelta(days=1)
-        commit_timestamp = commit_timestamp.isoformat()
-        print(
-            f"==> anchoring commits at {args.anchor_date}, backdating to {commit_timestamp}",
-            file=sys.stderr,
-        )
+        print(f"==> anchoring commits at {args.anchor_date} (fresh per-run)", file=sys.stderr)
 
     with httpx.Client(headers=headers, timeout=30) as client:
         for entry in spec["commits"]:
-            _apply_one(
-                client,
-                base,
-                project_quoted,
-                entry,
-                anchor=args.anchor_date,
-                commit_timestamp=commit_timestamp,
-            )
+            _apply_one(client, base, project_quoted, entry, anchor=args.anchor_date)
 
 
 def _apply_one(
@@ -85,7 +68,6 @@ def _apply_one(
     entry: dict[str, Any],
     *,
     anchor: str = "",
-    commit_timestamp: str = "",
 ) -> None:
     sha = entry["sha"]
     branch = entry.get("branch", "main")
@@ -117,9 +99,6 @@ def _apply_one(
         "commit_message": entry.get("message", "seed"),
         "actions": [{"action": "create", "file_path": path, "content": content}],
     }
-    if commit_timestamp:
-        payload["author_date"] = commit_timestamp
-        payload["commit_date"] = commit_timestamp
     resp = client.post(f"{base}/api/v4/projects/{project}/repository/commits", json=payload)
     if resp.status_code in {400, 409}:
         return  # idempotent: already exists

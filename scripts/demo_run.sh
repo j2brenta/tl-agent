@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/demo_run.sh — one-shot end-to-end demo of the tech-lead loop.
+# scripts/demo_run.sh — one-shot end-to-end demo of the team lead loop.
 #
 # Brings the compose stack up, seeds Jira/GitLab/Mattermost/SQLite, posts a
 # realistic bulk-transcript standup into Mattermost for a target date, runs

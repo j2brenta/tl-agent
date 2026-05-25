@@ -1,3 +1,3 @@
-"""tl-agent — tech-lead agentic workflow."""
+"""tl-agent — team lead agentic workflow."""
 
 __version__ = "0.1.0"

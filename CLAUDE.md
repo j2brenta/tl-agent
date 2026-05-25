@@ -6,7 +6,7 @@ stale.
 
 ## What this is
 
-`tl-agent` is a tech-lead agentic workflow: an 8-phase morning loop over
+`tl-agent` is a team lead agentic workflow: an 8-phase morning loop over
 four engineers (John, Matt, Alicia, Karen). The approved plan is
 `/Users/kirill/.claude/plans/let-s-build-the-tech-staged-stonebraker.md`;
 the user-facing summary lives in `README.md`.

@@ -126,7 +126,7 @@ import-jira: ## import active sprint from Jira into DB (DATE=YYYY-MM-DD override
 	$(PYTHON) -m tl_agent.cli import-jira --date $(or $(DATE),$(shell date +%F))
 
 .PHONY: run
-run: import-jira ## run the tech-lead loop, importing Jira snapshot first (DATE=YYYY-MM-DD overrides today)
+run: import-jira ## run the team lead loop, importing Jira snapshot first (DATE=YYYY-MM-DD overrides today)
 	$(PYTHON) -m tl_agent.cli run --date $(or $(DATE),$(shell date +%F))
 
 .PHONY: web

@@ -79,6 +79,7 @@ services:
       MM_SERVICESETTINGS_SITEURL: "http://localhost:8065"
       MM_SERVICESETTINGS_ENABLELOCALMODE: "true"
       MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION: "/var/tmp/mattermost_local.socket"
+      MM_SERVICESETTINGS_ENABLEUSERAPITOKEN: "true"
     ports:
       - "8065:8065"
     volumes:
