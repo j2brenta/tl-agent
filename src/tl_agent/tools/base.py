@@ -25,7 +25,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import ClassVar, cast
 
+from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel
+
+from tl_agent.obs.spans import tool_span
 
 logger = logging.getLogger(__name__)
 
@@ -140,75 +143,93 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         idempotency_lookup: IdempotencyLookup | None = None,
     ) -> ToolResult[OutputT] | ToolError:
         """Validated, retried, idempotent, instrumented invocation."""
-        # 1) input validation
-        try:
-            args = self.input_model.model_validate(raw_args)
-        except Exception as exc:
-            return ToolError(
-                kind=ToolErrorKind.VALIDATION,
-                message=f"input validation failed for {self.name}: {exc}",
-            )
-
-        # 2) idempotency lookup (writers)
-        key = self.idempotency_key(args, run_date_iso=run_date_iso)  # type: ignore[arg-type]
-        if key and idempotency_lookup is not None:
-            cached = await idempotency_lookup.get(key)
-            if cached is not None:
-                logger.info("tool.cache_hit", extra={"tool": self.name, "key": key})
-                try:
-                    value = self.output_model.model_validate(cached)
-                except Exception as exc:
-                    return ToolError(
-                        kind=ToolErrorKind.VALIDATION,
-                        message=f"cached value for {self.name} failed validation: {exc}",
-                    )
-                return ToolResult(value=cast(OutputT, value), cached=True, latency_ms=0.0)
-
-        # 3) retry loop
-        attempt = 0
-        start = time.perf_counter()
-        while True:
-            attempt += 1
+        with tool_span(self.name) as span:
+            # 1) input validation
             try:
-                value = await self._call(args)  # type: ignore[arg-type]
-            except ToolException as ex:
-                err = ex.to_error()
-                if self.retry_policy.should_retry(err, attempt):
-                    await asyncio.sleep(self.retry_policy.sleep_for(attempt))
-                    continue
-                logger.warning(
-                    "tool.failed",
-                    extra={"tool": self.name, "kind": err.kind.value, "attempt": attempt},
-                )
-                return err
+                args = self.input_model.model_validate(raw_args)
             except Exception as exc:
-                # Anything not explicitly modeled becomes UNKNOWN — never bare-raise.
-                err = ToolError(kind=ToolErrorKind.UNKNOWN, message=f"{type(exc).__name__}: {exc}")
-                if self.retry_policy.should_retry(err, attempt):
-                    await asyncio.sleep(self.retry_policy.sleep_for(attempt))
-                    continue
-                return err
-
-            latency_ms = (time.perf_counter() - start) * 1000
-
-            # 4) output validation (paranoid — subclass might break the contract)
-            try:
-                validated = self.output_model.model_validate(value.model_dump())
-            except Exception as exc:
-                return ToolError(
+                err = ToolError(
                     kind=ToolErrorKind.VALIDATION,
-                    message=f"output validation failed for {self.name}: {exc}",
+                    message=f"input validation failed for {self.name}: {exc}",
                 )
+                _record_tool_error(span, exc, err, attempts=0)
+                return err
 
-            # 5) idempotency persist (writers)
+            # 2) idempotency lookup (writers)
+            key = self.idempotency_key(args, run_date_iso=run_date_iso)  # type: ignore[arg-type]
             if key and idempotency_lookup is not None:
-                await idempotency_lookup.put(
-                    key=key,
-                    tool_name=self.name,
-                    run_date_iso=run_date_iso,
-                    result_json=validated.model_dump_json(),
+                cached = await idempotency_lookup.get(key)
+                if cached is not None:
+                    logger.info("tool.cache_hit", extra={"tool": self.name, "key": key})
+                    try:
+                        value = self.output_model.model_validate(cached)
+                    except Exception as exc:
+                        err = ToolError(
+                            kind=ToolErrorKind.VALIDATION,
+                            message=f"cached value for {self.name} failed validation: {exc}",
+                        )
+                        _record_tool_error(span, exc, err, attempts=0)
+                        return err
+                    span.set_attribute("tl_agent.tool.cached", True)
+                    span.set_status(Status(StatusCode.OK))
+                    return ToolResult(value=cast(OutputT, value), cached=True, latency_ms=0.0)
+
+            # 3) retry loop
+            attempt = 0
+            start = time.perf_counter()
+            while True:
+                attempt += 1
+                try:
+                    value = await self._call(args)  # type: ignore[arg-type]
+                except ToolException as ex:
+                    err = ex.to_error()
+                    if self.retry_policy.should_retry(err, attempt):
+                        await asyncio.sleep(self.retry_policy.sleep_for(attempt))
+                        continue
+                    logger.warning(
+                        "tool.failed",
+                        extra={"tool": self.name, "kind": err.kind.value, "attempt": attempt},
+                    )
+                    _record_tool_error(span, ex, err, attempts=attempt)
+                    return err
+                except Exception as exc:
+                    # Anything not explicitly modeled becomes UNKNOWN — never bare-raise.
+                    err = ToolError(
+                        kind=ToolErrorKind.UNKNOWN, message=f"{type(exc).__name__}: {exc}"
+                    )
+                    if self.retry_policy.should_retry(err, attempt):
+                        await asyncio.sleep(self.retry_policy.sleep_for(attempt))
+                        continue
+                    _record_tool_error(span, exc, err, attempts=attempt)
+                    return err
+
+                latency_ms = (time.perf_counter() - start) * 1000
+
+                # 4) output validation (paranoid — subclass might break the contract)
+                try:
+                    validated = self.output_model.model_validate(value.model_dump())
+                except Exception as exc:
+                    err = ToolError(
+                        kind=ToolErrorKind.VALIDATION,
+                        message=f"output validation failed for {self.name}: {exc}",
+                    )
+                    _record_tool_error(span, exc, err, attempts=attempt)
+                    return err
+
+                # 5) idempotency persist (writers)
+                if key and idempotency_lookup is not None:
+                    await idempotency_lookup.put(
+                        key=key,
+                        tool_name=self.name,
+                        run_date_iso=run_date_iso,
+                        result_json=validated.model_dump_json(),
+                    )
+                span.set_attribute("tl_agent.tool.attempts", attempt)
+                span.set_attribute("tl_agent.latency_ms", latency_ms)
+                span.set_status(Status(StatusCode.OK))
+                return ToolResult(
+                    value=cast(OutputT, validated), cached=False, latency_ms=latency_ms
                 )
-            return ToolResult(value=cast(OutputT, validated), cached=False, latency_ms=latency_ms)
 
 
 class ToolException(Exception):
@@ -245,6 +266,16 @@ class ToolException(Exception):
 
 def _default_retriable(kind: ToolErrorKind) -> bool:
     return kind in {ToolErrorKind.RATE_LIMIT, ToolErrorKind.UPSTREAM_5XX, ToolErrorKind.TIMEOUT}
+
+
+def _record_tool_error(span: object, exc: BaseException, err: ToolError, *, attempts: int) -> None:
+    # OpenTelemetry's Span object is structurally typed here to avoid an
+    # import cycle through tl_agent.obs — every span returned by tool_span()
+    # implements record_exception / set_status / set_attribute.
+    span.record_exception(exc)  # type: ignore[attr-defined]
+    span.set_status(Status(StatusCode.ERROR, err.message))  # type: ignore[attr-defined]
+    span.set_attribute("tl_agent.tool.error_kind", err.kind.value)  # type: ignore[attr-defined]
+    span.set_attribute("tl_agent.tool.attempts", attempts)  # type: ignore[attr-defined]
 
 
 class IdempotencyLookup:

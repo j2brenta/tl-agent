@@ -250,7 +250,7 @@ async def test_mattermost_empty_token_returns_clean_error(monkeypatch: pytest.Mo
     register_chat_tools()
     result = await GetChatMessagesTool().invoke(
         {
-            "channel_id": "c",
+            "channel_id": "town-square",
             "since": datetime(2026, 5, 22, 9, 0, tzinfo=UTC).isoformat(),
             "until": datetime(2026, 5, 22, 10, 0, tzinfo=UTC).isoformat(),
         },
@@ -312,3 +312,52 @@ async def test_mattermost_oauth_refresh_with_refresh_token(
     state = await MattermostProvider().refresh_oauth_token()
     assert state.access_token == "new-access"
     assert state.refresh_token == "rt-2"
+
+
+# -------------------- channel allowlist validation --------------------
+
+
+async def test_get_messages_rejects_unknown_channel_name() -> None:
+    """Invented channel names fail VALIDATION at the input boundary — no HTTP."""
+    from tl_agent.tools import ToolError, ToolErrorKind
+
+    result = await GetChatMessagesTool().invoke(
+        {
+            "channel_id": "team-standup",  # not in config/chat_channels.yaml
+            "since": datetime(2026, 5, 22, 9, 0, tzinfo=UTC).isoformat(),
+            "until": datetime(2026, 5, 22, 10, 0, tzinfo=UTC).isoformat(),
+        },
+        run_date_iso="2026-05-22",
+    )
+    assert isinstance(result, ToolError)
+    assert result.kind is ToolErrorKind.VALIDATION
+    assert "team-standup" in result.message
+    assert "town-square" in result.message  # the allowlist is surfaced to the LLM
+
+
+async def test_get_messages_accepts_26char_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fully-resolved Mattermost ID bypasses the allowlist (it's already been resolved)."""
+    monkeypatch.setenv("TLA_MATTERMOST_TOKEN", "tok")
+    # No HTTP mock needed — input validation must pass before any call.
+    bypass_id = "x" * 26
+    from tl_agent.tools.chat.tools import GetChatMessagesIn
+
+    parsed = GetChatMessagesIn.model_validate(
+        {
+            "channel_id": bypass_id,
+            "since": datetime(2026, 5, 22, 9, 0, tzinfo=UTC).isoformat(),
+            "until": datetime(2026, 5, 22, 10, 0, tzinfo=UTC).isoformat(),
+        }
+    )
+    assert parsed.channel_id == bypass_id
+
+
+async def test_post_standup_question_rejects_unknown_channel() -> None:
+    from tl_agent.tools import ToolError, ToolErrorKind
+    from tl_agent.tools.chat.tools import PostStandupQuestionTool
+
+    result = await PostStandupQuestionTool().invoke(
+        {"channel_id": "standup", "body": "hi"}, run_date_iso="2026-05-22"
+    )
+    assert isinstance(result, ToolError)
+    assert result.kind is ToolErrorKind.VALIDATION

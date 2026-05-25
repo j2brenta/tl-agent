@@ -13,15 +13,37 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from typing import Any, ClassVar
+from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tl_agent.models import GitCommit
 from tl_agent.settings import get_settings
 from tl_agent.tools._http import http_client, raise_from_http_error, raise_from_transport_error
 from tl_agent.tools.base import BaseTool
 from tl_agent.tools.registry import registry
+
+
+def _encode_project(value: str) -> str:
+    # GitLab REST requires namespaced paths to be URL-encoded in the path segment:
+    # `tl-agent/demo` must become `tl-agent%2Fdemo`, otherwise GitLab parses
+    # `tl-agent` as the id and returns 404 on every /repository/* sub-resource.
+    return quote(value, safe="")
+
+
+def _validate_project(value: str) -> str:
+    # Local import to avoid a circular dependency through settings/storage.
+    from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects
+
+    allowed = load_allowed_gitlab_projects()
+    if value not in allowed:
+        raise ValueError(
+            f"unknown project {value!r}. Allowed projects: {sorted(allowed)}. "
+            "Use a project from ownership.md, not a guess."
+        )
+    return value
+
 
 # Tickets like ENG-12, PAY-3 — used by `_parse_ticket_keys` over commit msgs.
 _TICKET_RE = re.compile(r"\b([A-Z]{2,8}-\d{1,6})\b")
@@ -43,10 +65,18 @@ def _parse_ticket_keys(text: str) -> tuple[str, ...]:
 
 
 class ListCommitsIn(BaseModel):
-    project: str = Field(min_length=1, description="GitLab project path, URL-encoded if needed.")
+    project: str = Field(
+        min_length=1,
+        description="GitLab project path (e.g. 'tl-agent/demo'). The tool URL-encodes it.",
+    )
     since: datetime
     until: datetime
     author: str | None = None
+
+    @field_validator("project")
+    @classmethod
+    def _check_project(cls, v: str) -> str:
+        return _validate_project(v)
 
 
 class ListCommitsOut(BaseModel):
@@ -72,7 +102,7 @@ class ListCommitsTool(BaseTool[ListCommitsIn, ListCommitsOut]):
         }
         if args.author:
             params["author"] = args.author
-        path = f"/api/v4/projects/{args.project}/repository/commits"
+        path = f"/api/v4/projects/{_encode_project(args.project)}/repository/commits"
         async with _client() as client:
             try:
                 r = await client.get(path, params=params)
@@ -109,6 +139,11 @@ class GetDiffIn(BaseModel):
     project: str = Field(min_length=1)
     sha: str = Field(min_length=7)
 
+    @field_validator("project")
+    @classmethod
+    def _check_project(cls, v: str) -> str:
+        return _validate_project(v)
+
 
 class FileDiff(BaseModel):
     path: str
@@ -134,7 +169,9 @@ class GetCommitDiffTool(BaseTool[GetDiffIn, GetDiffOut]):
     output_model: ClassVar[type[BaseModel]] = GetDiffOut
 
     async def _call(self, args: GetDiffIn) -> GetDiffOut:
-        path = f"/api/v4/projects/{args.project}/repository/commits/{args.sha}/diff"
+        path = (
+            f"/api/v4/projects/{_encode_project(args.project)}/repository/commits/{args.sha}/diff"
+        )
         async with _client() as client:
             try:
                 r = await client.get(path)
@@ -167,6 +204,11 @@ class GetCommitDiffTool(BaseTool[GetDiffIn, GetDiffOut]):
 class ListBranchesIn(BaseModel):
     project: str = Field(min_length=1)
 
+    @field_validator("project")
+    @classmethod
+    def _check_project(cls, v: str) -> str:
+        return _validate_project(v)
+
 
 class Branch(BaseModel):
     name: str
@@ -186,7 +228,7 @@ class ListBranchesTool(BaseTool[ListBranchesIn, ListBranchesOut]):
     output_model: ClassVar[type[BaseModel]] = ListBranchesOut
 
     async def _call(self, args: ListBranchesIn) -> ListBranchesOut:
-        path = f"/api/v4/projects/{args.project}/repository/branches"
+        path = f"/api/v4/projects/{_encode_project(args.project)}/repository/branches"
         async with _client() as client:
             try:
                 r = await client.get(path)

@@ -1,0 +1,13 @@
+# Chat channels the agent is allowed to read from or post into.
+# Names are Mattermost channel slugs (lowercased, hyphenated).
+#
+# The tool layer validates `channel_id` against this list and rejects
+# unknown values with a VALIDATION ToolError before any HTTP call —
+# this is what keeps Phase 5's ReACT loop from inventing channel names.
+# A 26-char Mattermost ID always bypasses the check.
+
+allowed_channels:
+  - town-square
+  - off-topic
+
+default_standup_channel: town-square

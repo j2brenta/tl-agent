@@ -173,7 +173,7 @@ def test_parse_ticket_keys() -> None:
 async def test_list_commits(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
         url=(
-            "http://localhost:8929/api/v4/projects/p1/repository/commits"
+            "http://localhost:8929/api/v4/projects/tl-agent%2Fdemo/repository/commits"
             "?since=2026-05-21T12:00:00%2B00:00&until=2026-05-22T12:00:00%2B00:00"
             "&with_stats=true&all=true"
         ),
@@ -189,7 +189,7 @@ async def test_list_commits(httpx_mock: HTTPXMock) -> None:
     )
     result = await ListCommitsTool().invoke(
         {
-            "project": "p1",
+            "project": "tl-agent/demo",
             "since": "2026-05-21T12:00:00+00:00",
             "until": "2026-05-22T12:00:00+00:00",
         },
@@ -204,14 +204,14 @@ async def test_list_commits(httpx_mock: HTTPXMock) -> None:
 
 async def test_get_commit_diff(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:8929/api/v4/projects/p1/repository/commits/abc1234/diff",
+        url="http://localhost:8929/api/v4/projects/tl-agent%2Fdemo/repository/commits/abc1234/diff",
         json=[
             {"new_path": "a.py", "additions": 10, "deletions": 1, "diff": "+ ..."},
             {"new_path": "b.py", "additions": 32, "deletions": 9, "diff": "+ ..."},
         ],
     )
     result = await GetCommitDiffTool().invoke(
-        {"project": "p1", "sha": "abc1234"}, run_date_iso="2026-05-22"
+        {"project": "tl-agent/demo", "sha": "abc1234"}, run_date_iso="2026-05-22"
     )
     assert isinstance(result, ToolResult)
     assert result.value.total_additions == 42
@@ -220,7 +220,7 @@ async def test_get_commit_diff(httpx_mock: HTTPXMock) -> None:
 
 async def test_list_branches(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:8929/api/v4/projects/p1/repository/branches",
+        url="http://localhost:8929/api/v4/projects/tl-agent%2Fdemo/repository/branches",
         json=[
             {
                 "name": "main",
@@ -232,7 +232,9 @@ async def test_list_branches(httpx_mock: HTTPXMock) -> None:
             }
         ],
     )
-    result = await ListBranchesTool().invoke({"project": "p1"}, run_date_iso="2026-05-22")
+    result = await ListBranchesTool().invoke(
+        {"project": "tl-agent/demo"}, run_date_iso="2026-05-22"
+    )
     assert isinstance(result, ToolResult)
     assert result.value.branches[0].name == "main"
 
@@ -298,3 +300,34 @@ async def test_get_baseline_returns_value_when_present(memory_conn: sqlite3.Conn
     assert isinstance(result, ToolResult)
     assert result.value.baseline is not None
     assert result.value.baseline.value == 4.0
+
+
+# -------------------- gitlab project allowlist --------------------
+
+
+async def test_list_commits_rejects_unknown_project() -> None:
+    """LLM-invented project paths fail VALIDATION before any HTTP call."""
+    result = await ListCommitsTool().invoke(
+        {
+            "project": "acme/backend",
+            "since": "2026-05-21T12:00:00+00:00",
+            "until": "2026-05-22T12:00:00+00:00",
+        },
+        run_date_iso="2026-05-22",
+    )
+    assert isinstance(result, type(result))  # always true; assert below is the real check
+    assert result.kind is ToolErrorKind.VALIDATION  # type: ignore[union-attr]
+    assert "acme/backend" in result.message  # type: ignore[union-attr]
+    assert "tl-agent/demo" in result.message  # type: ignore[union-attr]
+
+
+async def test_get_commit_diff_rejects_unknown_project() -> None:
+    result = await GetCommitDiffTool().invoke(
+        {"project": "main", "sha": "abc1234"}, run_date_iso="2026-05-22"
+    )
+    assert result.kind is ToolErrorKind.VALIDATION  # type: ignore[union-attr]
+
+
+async def test_list_branches_rejects_unknown_project() -> None:
+    result = await ListBranchesTool().invoke({"project": "nope/nada"}, run_date_iso="2026-05-22")
+    assert result.kind is ToolErrorKind.VALIDATION  # type: ignore[union-attr]

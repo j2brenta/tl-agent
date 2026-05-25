@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 from tl_agent.models import Engineer
 from tl_agent.settings import get_settings
@@ -77,3 +80,34 @@ def load_markdown(name: str, config_dir: Path | None = None) -> str:
     """
     root = config_dir or get_settings().config_dir
     return (root / name).read_text(encoding="utf-8")
+
+
+# -------------------- allowlists (chat channels, gitlab projects) --------------------
+#
+# These are tool-layer guards against the LLM inventing identifiers. The
+# loaders are cached because they are hit on every tool invocation; tests
+# reset the cache via `_load_allowlist.cache_clear()`.
+
+
+@lru_cache(maxsize=8)
+def _load_allowlist(path: Path, key: str) -> frozenset[str]:
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    values = data.get(key) or []
+    if not isinstance(values, list):
+        raise ValueError(f"{path}: key {key!r} must be a list, got {type(values).__name__}")
+    return frozenset(str(v) for v in values)
+
+
+def load_allowed_chat_channels(config_dir: Path | None = None) -> frozenset[str]:
+    root = config_dir or get_settings().config_dir
+    return _load_allowlist(root / "chat_channels.yaml", "allowed_channels")
+
+
+def load_allowed_gitlab_projects(config_dir: Path | None = None) -> frozenset[str]:
+    root = config_dir or get_settings().config_dir
+    return _load_allowlist(root / "gitlab_projects.yaml", "allowed_projects")
+
+
+def clear_allowlist_cache() -> None:
+    """Reset the YAML allowlist cache. Test-only."""
+    _load_allowlist.cache_clear()

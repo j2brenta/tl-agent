@@ -68,19 +68,27 @@ async def run(ctx: RunContext, *, hotspots: list[Hotspot]) -> list[DeepDive]:
             idempotency=ctx.idempotency,
             run_date_iso=ctx.run_date_iso,
         )
-        result = await loop.run(task=_task_for_hotspot(hot))
+        result = await loop.run(task=_task_for_hotspot(hot, ctx))
         return DeepDive(hotspot=hot, loop_result=result)
 
     return await fan_out(targets, worker=_one, gate=gate)
 
 
-def _task_for_hotspot(h: Hotspot) -> str:
-    """Frame the hot spot as a concrete question for the deep-dive agent."""
+def _task_for_hotspot(h: Hotspot, ctx: RunContext) -> str:
+    """Frame the hot spot as a concrete question for the deep-dive agent.
+
+    The "Known IDs" line is load-bearing: without it the model has no way to
+    know which channel/project to pass to get_chat_messages / list_commits
+    and tends to guess (`team-standup`, `acme/backend`, etc.), which the
+    tool-layer allowlist then rejects. Cheaper to just tell it up front.
+    """
     eng_part = f"for {', '.join(h.engineer_ids)}" if h.engineer_ids else "team-wide"
     tickets = f" (related: {', '.join(h.related_ticket_ids)})" if h.related_ticket_ids else ""
     return (
         f"Investigate this hot spot {eng_part}: {h.summary}{tickets}. "
         f"Severity={h.severity.value}, days_hot={h.days_hot}. "
+        f"Known IDs (use these verbatim — do not guess): "
+        f"chat channel_id={ctx.standup_channel_id!r}, gitlab project={ctx.project!r}. "
         "Use the tools to confirm or refute the framing, then write a 2-3 sentence "
         "diagnosis. Cite every claim."
     )

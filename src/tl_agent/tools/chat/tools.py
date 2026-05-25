@@ -13,13 +13,33 @@ from __future__ import annotations
 from datetime import datetime
 from typing import ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tl_agent.models.chat import ChatMessage, PostResult
 from tl_agent.tools.base import BaseTool, RetryPolicy
 from tl_agent.tools.chat.factory import get_chat_provider
 from tl_agent.tools.idempotency import make_key
 from tl_agent.tools.registry import registry
+
+# 26-char alphanumeric Mattermost IDs are always-resolved; only names need
+# allowlist validation. Keep length check identical to chat.mattermost.
+_MATTERMOST_ID_LEN = 26
+
+
+def _validate_channel_id(value: str) -> str:
+    if len(value) == _MATTERMOST_ID_LEN and value.isalnum():
+        return value
+    # Local import to avoid a circular dependency through settings/storage.
+    from tl_agent.storage.markdown_loader import load_allowed_chat_channels
+
+    allowed = load_allowed_chat_channels()
+    if value not in allowed:
+        raise ValueError(
+            f"unknown channel {value!r}. Allowed channels: {sorted(allowed)}. "
+            "Use the channel from working context, not a guess."
+        )
+    return value
+
 
 # -------------------- post_dm --------------------
 
@@ -55,6 +75,11 @@ class PostStandupQuestionIn(BaseModel):
     channel_id: str = Field(min_length=1)
     body: str = Field(min_length=1, max_length=2000)
 
+    @field_validator("channel_id")
+    @classmethod
+    def _check_channel(cls, v: str) -> str:
+        return _validate_channel_id(v)
+
 
 class PostStandupQuestionTool(BaseTool[PostStandupQuestionIn, PostResult]):
     name: ClassVar[str] = "post_standup_question"
@@ -83,6 +108,11 @@ class GetChatMessagesIn(BaseModel):
     since: datetime
     until: datetime
     limit: int = Field(default=100, ge=1, le=500)
+
+    @field_validator("channel_id")
+    @classmethod
+    def _check_channel(cls, v: str) -> str:
+        return _validate_channel_id(v)
 
 
 class GetChatMessagesOut(BaseModel):

@@ -25,6 +25,15 @@ env: ## scaffold .env from .env.example (idempotent — never overwrites)
 		cp .env.example .env && echo "wrote .env — edit it with your tokens"; \
 	fi
 
+.PHONY: install-hooks
+install-hooks: ## install .claude/hooks/pre_commit.sh as .git/hooks/pre-commit
+	@if [ ! -d .git ]; then echo "not in a git repo"; exit 1; fi
+	@mkdir -p .git/hooks
+	@ln -sf ../../.claude/hooks/pre_commit.sh .git/hooks/pre-commit
+	@chmod +x .claude/hooks/pre_commit.sh
+	@echo "==> linked .git/hooks/pre-commit → .claude/hooks/pre_commit.sh"
+	@echo "    next commit will run \`make check\` first (bypass: git commit --no-verify)"
+
 .PHONY: lock
 lock: ## refresh uv.lock
 	uv lock

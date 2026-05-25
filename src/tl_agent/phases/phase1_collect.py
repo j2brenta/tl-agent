@@ -48,6 +48,26 @@ async def run(ctx: RunContext) -> DailySignals:
     )
 
     sprint_day, sprint_length, sprint_tickets, added_since = sprint
+    # Per-source counts; lets a 0 anywhere be diagnosed without re-running.
+    logger.info(
+        "phase1.collected",
+        extra={
+            "run_date": ctx.run_date_iso,
+            "window_since": since.isoformat(),
+            "window_until": until.isoformat(),
+            "sprint_id": ctx.sprint_id,
+            "sprint_day": sprint_day,
+            "sprint_length_days": sprint_length,
+            "sprint_tickets": len(sprint_tickets),
+            "tickets_added_since_yesterday": len(added_since),
+            "commits": len(commits),
+            "standups_today": len(st_today),
+            "standups_yesterday": len(st_yesterday),
+            "project": ctx.project,
+            "standup_channel_id": ctx.standup_channel_id,
+            "notes": list(ctx.notes),
+        },
+    )
     return DailySignals(
         run_date=ctx.run_date_iso,
         standups_today=st_today,

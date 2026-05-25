@@ -1,0 +1,9 @@
+# GitLab projects the agent is allowed to query.
+# Values are `path_with_namespace` as reported by the GitLab API.
+#
+# The tool layer validates `project` against this list and rejects
+# unknown values with a VALIDATION ToolError before any HTTP call.
+# Keep this in sync with infra/gitlab/seed.sh.
+
+allowed_projects:
+  - tl-agent/demo
