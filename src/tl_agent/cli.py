@@ -66,6 +66,8 @@ def run(
     table = Table(title=f"Run {result.run_id} — {result.run_date.isoformat()}")
     table.add_column("metric")
     table.add_column("value")
+    table.add_row("commits collected", str(result.commits_count))
+    table.add_row("standups received", str(result.standups_count))
     table.add_row("decisions drafted", str(len(result.brief.decisions)))
     table.add_row("deep-dives", str(result.deep_dives_count))
     table.add_row("open flags", str(result.open_flag_count))
@@ -153,6 +155,93 @@ def init_db(
     finally:
         conn.close()
     console.print(f"[green]initialised SQLite at {target}[/green]")
+
+
+@app.command()
+def status(
+    run_date: Annotated[
+        str,
+        typer.Option("--date", help="ISO date to inspect (defaults to most recent run)"),
+    ] = "",
+) -> None:
+    """Show what phase 1 collected in the last run: commits, standups, tickets."""
+    import json
+
+    from tl_agent.settings import get_settings
+    from tl_agent.storage import connect
+
+    conn = connect(get_settings().sqlite_path)
+    if run_date:
+        rows = conn.execute(
+            "SELECT * FROM runs WHERE run_date = ? ORDER BY started_at DESC LIMIT 5",
+            (run_date,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM runs ORDER BY started_at DESC LIMIT 5").fetchall()
+
+    if not rows:
+        console.print("[yellow]no runs found[/yellow]")
+        return
+
+    table = Table(title="Run status")
+    table.add_column("date")
+    table.add_column("status")
+    table.add_column("commits")
+    table.add_column("commit dates")
+    table.add_column("standups")
+    table.add_column("tickets")
+    table.add_column("run id")
+
+    for r in rows:
+        notes = json.loads(r["notes"]) if r["notes"] else {}
+        sig = notes.get("signals", {})
+        dates = ", ".join(sig.get("commit_dates", []) or []) or "—"
+        table.add_row(
+            r["run_date"],
+            r["status"],
+            str(sig.get("commits", "?")),
+            dates,
+            str(sig.get("standups_today", "?")),
+            str(sig.get("sprint_tickets", "?")),
+            r["id"],
+        )
+
+    console.print(table)
+
+
+@app.command(name="import-jira")
+def import_jira(
+    run_date: Annotated[
+        str,
+        typer.Option("--date", help="ISO date to snapshot against (defaults to today)"),
+    ] = "",
+) -> None:
+    """Pull the active sprint from Jira and save a ticket snapshot for the given date."""
+    from datetime import date as _date
+
+    from tl_agent.settings import get_settings
+    from tl_agent.storage import connect, transaction
+    from tl_agent.storage.repos import snapshots as snapshots_repo
+    from tl_agent.tools.jira import ListSprintIn, ListSprintTool
+
+    target = _date.fromisoformat(run_date) if run_date else _date.today()
+
+    async def _run() -> int:
+        tool = ListSprintTool()
+        from tl_agent.tools.base import ToolError
+
+        outcome = await tool.invoke(ListSprintIn().model_dump(), run_date_iso=target.isoformat())
+        if isinstance(outcome, ToolError):
+            raise RuntimeError(outcome.message)
+        result = outcome.value
+        conn = connect(get_settings().sqlite_path)
+        with transaction(conn):
+            for ticket in result.tickets:
+                snapshots_repo.upsert(conn, target, ticket)
+        return len(result.tickets)
+
+    n = asyncio.run(_run())
+    console.print(f"[green]imported {n} tickets for {target.isoformat()}[/green]")
 
 
 @app.command()

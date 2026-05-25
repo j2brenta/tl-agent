@@ -14,6 +14,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Any
 
 from tl_agent.llm.budget import BudgetTracker
 from tl_agent.obs.spans import phase_span
@@ -31,8 +32,9 @@ from tl_agent.phases import (
 from tl_agent.phases._context import RunContext
 from tl_agent.phases.phase7_compose import Brief
 from tl_agent.settings import get_settings
-from tl_agent.storage import connect, initialize, load_team
+from tl_agent.storage import connect, initialize, load_team, transaction
 from tl_agent.storage.repos import flags as flags_repo
+from tl_agent.storage.repos import observations as obs_repo
 from tl_agent.tools import SqliteIdempotencyStore, registry
 from tl_agent.tools.chat.tools import register_chat_tools
 from tl_agent.tools.gitlab import register_gitlab_tools
@@ -52,6 +54,8 @@ class RunResult:
     open_flag_count: int
     closed_flag_count: int
     deep_dives_count: int
+    commits_count: int = 0
+    standups_count: int = 0
     notes: list[str] = field(default_factory=list[str])
 
 
@@ -93,17 +97,47 @@ async def run(run_date: date | None = None) -> RunResult:
 @phase_span("orchestrator.run")
 async def _run_pipeline(ctx: RunContext) -> RunResult:
     """The actual phase chain. Separate from `run()` so tests can inject ctx."""
-    # Phase boundaries are logged at INFO so `tl-agent run` (verbose by
-    # default) shows progress — the difference between "hung" and "Phase 5
-    # is running a long ReACT loop on a local model".
+    import json
     import time as _time
+    from datetime import UTC, datetime
+
+    phase_log: list[dict[str, object]] = []
 
     def _started(name: str) -> float:
         logger.info("→ %s", name)
         return _time.perf_counter()
 
-    def _done(name: str, t0: float) -> None:
-        logger.info("✓ %s (%.1fs)", name, _time.perf_counter() - t0)
+    def _done(name: str, t0: float, status: str = "ok") -> None:
+        dur = round(_time.perf_counter() - t0, 2)
+        logger.info("✓ %s (%.1fs)", name, dur)
+        phase_log.append({"phase": name, "status": status, "duration_s": dur})
+
+    signals_summary: dict[str, Any] = {}
+
+    def _save_run(status: str) -> None:
+        notes_payload = json.dumps(
+            {"phases": phase_log, "errors": list(ctx.notes), "signals": signals_summary}
+        )
+        ctx.sqlite.execute(
+            """
+            INSERT INTO runs (id, run_date, started_at, status, trace_id, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                finished_at = excluded.finished_at,
+                status      = excluded.status,
+                notes       = excluded.notes
+            """,
+            (
+                ctx.run_id,
+                ctx.run_date.isoformat(),
+                datetime.now(UTC).isoformat(),
+                status,
+                getattr(ctx, "trace_id", None),
+                notes_payload,
+            ),
+        )
+
+    _save_run("in_progress")
 
     t = _started("phase0_loop_closure")
     await phase0_loop_closure.run(ctx)
@@ -112,6 +146,29 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
     t = _started("phase1_collect")
     signals = await phase1_collect.run(ctx)
     _done("phase1_collect", t)
+    signals_summary.update(
+        {
+            "commits": len(signals.commits),
+            "commit_dates": sorted({c.committed_at.strftime("%Y-%m-%d") for c in signals.commits}),
+            "standups_today": len(signals.standups_today),
+            "sprint_tickets": len(signals.sprint_tickets),
+            "tickets_added_since_yesterday": len(signals.tickets_added_since_yesterday),
+        }
+    )
+
+    # Persist today's standup observations so the sprint UI can display them
+    # without requiring the full 8-phase pipeline to complete first.
+    with transaction(ctx.sqlite):
+        for msg in signals.standups_today:
+            obs_repo.upsert(
+                ctx.sqlite,
+                obs_id=f"{ctx.run_date.isoformat()}:{msg.engineer_id}",
+                run_date=ctx.run_date,
+                engineer_id=msg.engineer_id,
+                raw=msg.raw,
+                summary=None,
+                chat_message_id=msg.chat_message_id,
+            )
 
     t = _started("phase2_triage")
     per_engineer = await phase2_triage.run(ctx, signals)
@@ -137,6 +194,8 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
     brief = await phase7_compose.run(ctx, drafts=drafts, deep_dives=deep_dives)
     _done("phase7_compose", t)
 
+    _save_run("completed")
+
     open_flags = len(flags_repo.list_open_on(ctx.sqlite, ctx.run_date))
     return RunResult(
         run_id=ctx.run_id,
@@ -145,6 +204,8 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
         open_flag_count=open_flags,
         closed_flag_count=len(reconciled.closed_flag_ids),
         deep_dives_count=len(deep_dives),
+        commits_count=signals_summary.get("commits", 0),
+        standups_count=signals_summary.get("standups_today", 0),
         notes=list(ctx.notes),
     )
 

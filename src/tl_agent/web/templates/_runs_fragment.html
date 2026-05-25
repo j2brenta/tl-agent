@@ -1,0 +1,65 @@
+{# HTMX fragment: run details for a date. Loaded lazily on expand. #}
+<div id="runs-detail">
+{% if not runs %}
+  <div style="font-size:13px;color:var(--text-muted);padding:8px 0">
+    No pipeline runs recorded for {{ selected_date }}.
+    Run <code>tl-agent run --date {{ selected_date }}</code> to populate.
+  </div>
+{% else %}
+  {% for run in runs %}
+  <div style="margin-bottom:{% if not loop.last %}20px{% else %}0{% endif %}">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">{{ run.id }}</span>
+      <span style="font-size:11px;color:var(--text-muted)">started {{ run.started_at[:19].replace('T',' ') }} UTC</span>
+      {% if run.status == 'completed' %}
+        <span class="badge badge-green" style="font-size:10px">completed</span>
+      {% elif run.status == 'in_progress' %}
+        <span class="badge badge-blue" style="font-size:10px">in progress</span>
+      {% else %}
+        <span class="badge badge-amber" style="font-size:10px">{{ run.status }}</span>
+      {% endif %}
+    </div>
+
+    {% if run.signals %}
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px">
+      <span><strong>{{ run.signals.commits or 0 }}</strong> <span style="color:var(--text-muted)">commits</span>
+        {% if run.signals.commit_dates %}
+          <span style="color:var(--text-faint);font-family:var(--mono);font-size:10px">({{ run.signals.commit_dates | join(', ') }})</span>
+        {% endif %}
+      </span>
+      <span><strong>{{ run.signals.standups_today or 0 }}</strong> <span style="color:var(--text-muted)">standups</span></span>
+      <span><strong>{{ run.signals.sprint_tickets or 0 }}</strong> <span style="color:var(--text-muted)">sprint tickets</span></span>
+      {% if run.signals.tickets_added_since_yesterday %}
+      <span style="color:var(--amber-text)"><strong>{{ run.signals.tickets_added_since_yesterday }}</strong> added mid-sprint</span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if run.phases %}
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+      {% for p in run.phases %}
+      <div style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);font-size:11px">
+        {% if p.status == 'ok' %}
+          <span style="color:var(--green);font-size:10px">●</span>
+        {% else %}
+          <span style="color:var(--red);font-size:10px">●</span>
+        {% endif %}
+        <span style="font-family:var(--mono)">{{ p.phase }}</span>
+        <span style="color:var(--text-faint)">{{ p.duration_s }}s</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if run.errors %}
+    <div style="margin-top:6px">
+      <div style="font-size:11px;font-weight:600;color:var(--amber-text);margin-bottom:4px">Warnings / errors</div>
+      {% for err in run.errors %}
+      <div style="font-size:11px;font-family:var(--mono);color:var(--amber-text);background:var(--amber-bg);border:1px solid #fcd34d;border-radius:var(--radius-sm);padding:4px 8px;margin-bottom:3px">{{ err }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% endif %}
+</div>

@@ -1,27 +1,25 @@
 """Apply commits.yaml against a running GitLab project.
 
 For each entry, create the file on the requested branch and commit via the
-Files API. We use synthetic content (commit message + line padding to reach
+Commits API. We use synthetic content (commit message + line padding to reach
 the desired insertions count) rather than tracked file contents — the agent
 only reads the diff stats, not the actual file contents.
 
-GitLab's Files API stamps the commit's `committed_date` with wall-clock UTC
-at the time of the API call — there's no way to back-date it. So:
-
 - The first run creates commits at the path `seed/<sha>.txt` on each
-  feature branch; subsequent runs hit the file-exists check and skip.
+  feature branch; subsequent runs hit the 400/409 check and skip.
 - Passing `--anchor-date YYYY-MM-DD` namespaces the path under
-  `seed/<anchor>/<sha>.txt` and the branch as `<branch>-<anchor>`. That
-  forces fresh commits per anchor — useful for demo runs where the agent's
-  Phase 1 commit fetch window is `[run_date - 24h, run_date]`. As long as
-  the demo is run within that window (typically today/tomorrow), the new
-  commits land in range. Old anchored commits stay around for replay.
+  `seed/<anchor>/<sha>.txt` and the branch as `<branch>-<anchor>`. The
+  commits are backdated to `anchor_date - 1 day` at 18:00 UTC so they fall
+  inside Phase 1's fetch window of `[run_date-1 12:00 UTC, run_date 12:00 UTC]`
+  regardless of when this script is actually run. Old anchored commits stay
+  around for replay.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -56,12 +54,28 @@ def main() -> None:
     base = args.gitlab_url.rstrip("/")
     project_quoted = args.project.replace("/", "%2F")
 
+    commit_timestamp = ""
     if args.anchor_date:
-        print(f"==> anchoring commits at {args.anchor_date} (fresh per-run)", file=sys.stderr)
+        anchor = date.fromisoformat(args.anchor_date)
+        commit_timestamp = datetime(anchor.year, anchor.month, anchor.day, tzinfo=UTC).replace(
+            hour=18
+        ) - timedelta(days=1)
+        commit_timestamp = commit_timestamp.isoformat()
+        print(
+            f"==> anchoring commits at {args.anchor_date}, backdating to {commit_timestamp}",
+            file=sys.stderr,
+        )
 
     with httpx.Client(headers=headers, timeout=30) as client:
         for entry in spec["commits"]:
-            _apply_one(client, base, project_quoted, entry, anchor=args.anchor_date)
+            _apply_one(
+                client,
+                base,
+                project_quoted,
+                entry,
+                anchor=args.anchor_date,
+                commit_timestamp=commit_timestamp,
+            )
 
 
 def _apply_one(
@@ -71,6 +85,7 @@ def _apply_one(
     entry: dict[str, Any],
     *,
     anchor: str = "",
+    commit_timestamp: str = "",
 ) -> None:
     sha = entry["sha"]
     branch = entry.get("branch", "main")
@@ -95,13 +110,16 @@ def _apply_one(
         )
 
     # Try to commit. If the file already exists at this path, skip.
-    payload = {
+    payload: dict[str, Any] = {
         "branch": branch,
         "author_email": entry.get("author", "dev@example.local"),
         "author_name": entry.get("author", "dev").split("@")[0],
         "commit_message": entry.get("message", "seed"),
         "actions": [{"action": "create", "file_path": path, "content": content}],
     }
+    if commit_timestamp:
+        payload["author_date"] = commit_timestamp
+        payload["commit_date"] = commit_timestamp
     resp = client.post(f"{base}/api/v4/projects/{project}/repository/commits", json=payload)
     if resp.status_code in {400, 409}:
         return  # idempotent: already exists

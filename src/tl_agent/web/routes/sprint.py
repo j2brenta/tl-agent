@@ -82,7 +82,7 @@ async def sprint(date: str | None = None) -> HTMLResponse:
     for flag in open_flags:
         if flag.type == FlagType.OFF_SPRINT:
             off_sprint_flags.append(flag)
-        if flag.engineer_id:
+        elif flag.engineer_id:
             flags_by_eng.setdefault(flag.engineer_id, []).append(flag)
         else:
             team_flags.append(flag)
@@ -97,7 +97,8 @@ async def sprint(date: str | None = None) -> HTMLResponse:
         blocked = [t for t in eng_tickets if t.status == JiraStatus.BLOCKED]
         done = [t for t in eng_tickets if t.status == JiraStatus.DONE]
         hot_flags = [f for f in eng_flags if f.days_hot >= 2]
-        on_track = not blocked and not hot_flags
+        has_data = bool(eng_tickets or observation or eng_flags)
+        on_track = has_data and not blocked and not hot_flags
 
         engineers_data.append(
             {

@@ -32,7 +32,7 @@ class Flag(BaseModel):
 
     id: str = Field(min_length=1)
     type: FlagType
-    title: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=400)
     engineer_id: str | None = None  # None for team-wide
     related_ticket_ids: tuple[str, ...] = ()
     status: TriageStatus

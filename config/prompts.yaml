@@ -8,8 +8,8 @@
 
 versions:
   phase2_triage: 2
-  phase3_correlate: 1
+  phase3_correlate: 2
   phase5_deepdive: 1
-  phase6_response_mode: 1
+  phase6_response_mode: 2
   phase7_compose: 1
   verifier: 1

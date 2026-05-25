@@ -60,7 +60,7 @@ def build_state() -> dict[str, object]:
             "sprint": "S-2026-05",
             "created_at": created.isoformat(),
             "updated_at": updated.isoformat(),
-            "added_to_sprint_at": created.isoformat(),
+            "added_to_sprint_at": None,
             "blocks": [],
             "blocked_by": [],
             "status_history": [],

@@ -136,18 +136,25 @@
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
 
     {# Standup #}
-    <div>
-      <div class="section-label">Standup</div>
+    <div data-standup>
+      <div class="section-label" style="display:flex;align-items:center;justify-content:space-between">
+        Standup
+        {% if row.observation %}
+          <button type="button"
+                  style="font-size:10px;padding:1px 7px;border-radius:99px;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);cursor:pointer"
+                  onclick="var p=this.closest('[data-standup]').querySelector('.standup-raw');var shown=p.style.display!=='none';p.style.display=shown?'none':'block';this.textContent=shown?'show':'hide'">
+            hide
+          </button>
+        {% endif %}
+      </div>
       {% if row.observation %}
         {% if row.observation.summary %}
-          <div style="font-size:13px;font-style:italic;color:#334155;margin-bottom:8px;line-height:1.5">
+          <div style="font-size:13px;font-style:italic;color:#334155;margin-bottom:6px;line-height:1.5">
             "{{ row.observation.summary }}"
           </div>
         {% endif %}
-        <details>
-          <summary>raw message</summary>
-          <pre style="font-size:11px;white-space:pre-wrap;margin-top:6px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);line-height:1.5">{{ row.observation.raw }}</pre>
-        </details>
+        <pre class="standup-raw"
+             style="font-size:11px;white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);line-height:1.5;max-height:180px;overflow-y:auto">{{ row.observation.raw }}</pre>
       {% else %}
         <div style="font-size:12px;color:var(--text-faint);font-style:italic">no standup recorded</div>
       {% endif %}
@@ -158,7 +165,7 @@
       <div class="section-label">Tickets ({{ row.tickets|length }})</div>
       {% if row.tickets %}
       <table style="font-size:12px">
-        {% for t in row.tickets %}
+        {% for t in row.tickets | sort(attribute='key') %}
         {% set s = t.status.value %}
         <tr>
           <td style="padding:4px 8px 4px 0;font-family:var(--mono);color:var(--text-muted);white-space:nowrap;font-size:11px">{{ t.key }}</td>
@@ -228,7 +235,7 @@
   <table>
     <thead>
       <tr>
-        <th>Key</th>
+        <th>Ticket</th>
         <th>Summary</th>
         <th>Assignee</th>
         <th>Status</th>
@@ -254,25 +261,17 @@
       </tr>
       {% endmacro %}
 
-      {# Blocked first #}
-      {% for eng_row in engineers %}
-        {% for t in eng_row.tickets if t.status.value == 'blocked' %}{{ ticket_row(t) }}{% endfor %}
+      {# Collect all tickets then render by status priority, sorted by key within each group #}
+      {% set ns = namespace(all=[]) %}
+      {% for eng_row in engineers %}{% for t in eng_row.tickets %}{% set _ = ns.all.append(t) %}{% endfor %}{% endfor %}
+      {% for status in ['blocked','in_progress','in_review','todo','done'] %}
+        {% for t in ns.all | selectattr('status.value','eq',status) | sort(attribute='key') %}
+          {{ ticket_row(t) }}
+        {% endfor %}
       {% endfor %}
-      {# In progress #}
-      {% for eng_row in engineers %}
-        {% for t in eng_row.tickets if t.status.value == 'in_progress' %}{{ ticket_row(t) }}{% endfor %}
-      {% endfor %}
-      {# In review #}
-      {% for eng_row in engineers %}
-        {% for t in eng_row.tickets if t.status.value == 'in_review' %}{{ ticket_row(t) }}{% endfor %}
-      {% endfor %}
-      {# Other (todo, etc.) #}
-      {% for eng_row in engineers %}
-        {% for t in eng_row.tickets if t.status.value not in ['blocked','in_progress','in_review','done'] %}{{ ticket_row(t) }}{% endfor %}
-      {% endfor %}
-      {# Done last #}
-      {% for eng_row in engineers %}
-        {% for t in eng_row.tickets if t.status.value == 'done' %}{{ ticket_row(t) }}{% endfor %}
+      {# Catch-all for any other statuses #}
+      {% for t in ns.all | rejectattr('status.value','in',['blocked','in_progress','in_review','todo','done']) | sort(attribute='key') %}
+        {{ ticket_row(t) }}
       {% endfor %}
     </tbody>
   </table>
@@ -302,7 +301,7 @@
   <div style="margin-bottom:12px">
     <div class="section-label" style="color:var(--amber-text)">Tickets added mid-sprint</div>
     <table style="font-size:12px">
-      {% for t in unplanned_tickets %}
+      {% for t in unplanned_tickets | sort(attribute='key') %}
       <tr>
         <td style="font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:nowrap;padding-right:10px">{{ t.key }}</td>
         <td>{{ t.summary }}</td>
@@ -329,6 +328,23 @@
   </div>
   {% endif %}
 </div>
+{% endif %}
+
+{# ── Run details (collapsible, lazy-loaded) ── #}
+{% if selected_date %}
+<details style="margin-top:16px" id="run-details-toggle"
+         hx-get="/runs/fragment?date={{ selected_date }}"
+         hx-target="#run-details-content"
+         hx-swap="innerHTML"
+         hx-trigger="toggle once">
+  <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:8px 0;user-select:none">
+    Pipeline run details
+  </summary>
+  <div id="run-details-content"
+       style="margin-top:10px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm)">
+    <span style="font-size:12px;color:var(--text-faint)">Loading…</span>
+  </div>
+</details>
 {% endif %}
 
 {% endif %}{# end no_data #}

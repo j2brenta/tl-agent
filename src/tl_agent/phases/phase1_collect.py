@@ -43,8 +43,8 @@ async def run(ctx: RunContext) -> DailySignals:
 
     sprint_task = _fetch_sprint(ctx)
     commits_task = _fetch_commits(ctx, since, until)
-    standups_today_task = _fetch_standups(ctx, since=since, until=until)
-    standups_yesterday_task = _fetch_standups(ctx, since=since - timedelta(days=1), until=since)
+    standups_today_task = fetch_standups(ctx, since=since, until=until)
+    standups_yesterday_task = fetch_standups(ctx, since=since - timedelta(days=1), until=since)
 
     sprint, commits, st_today, st_yesterday = await asyncio.gather(
         sprint_task, commits_task, standups_today_task, standups_yesterday_task
@@ -113,7 +113,7 @@ async def _fetch_commits(ctx: RunContext, since: datetime, until: datetime) -> l
     return list(result.value.commits)
 
 
-async def _fetch_standups(
+async def fetch_standups(
     ctx: RunContext, *, since: datetime, until: datetime
 ) -> list[StandupMessage]:
     """Pull chat history and map messages → StandupMessage by author."""

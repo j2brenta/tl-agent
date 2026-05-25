@@ -101,6 +101,13 @@ reset-state: ## wipe SQLite state, re-apply schema, then re-seed
 	$(PYTHON) -m tl_agent.cli reset --confirm
 	$(MAKE) seed
 
+.PHONY: clean-mattermost
+clean-mattermost: ## delete all posts from the Mattermost town-square channel
+	@docker exec tla-mm-db psql -U mmuser -d mattermost -c \
+	  "DELETE FROM posts WHERE channelid = (SELECT id FROM channels WHERE name = 'town-square' LIMIT 1);" \
+	  && echo "==> town-square cleared" \
+	  || echo "==> tla-mm-db not running — skipped"
+
 .PHONY: snapshot
 snapshot: ## pg_dump mattermost-postgres → fixtures/mattermost.dump (eval baseline)
 	bash infra/mattermost/snapshot.sh dump
@@ -110,8 +117,16 @@ restore: ## restore mattermost-postgres from snapshot (per-eval reset)
 	bash infra/mattermost/snapshot.sh restore
 
 # -------------------- run --------------------
+.PHONY: status
+status: ## show last run signals: commits, standups, tickets (DATE= optional)
+	$(PYTHON) -m tl_agent.cli status $(if $(DATE),--date $(DATE),)
+
+.PHONY: import-jira
+import-jira: ## import active sprint from Jira into DB (DATE=YYYY-MM-DD overrides today)
+	$(PYTHON) -m tl_agent.cli import-jira --date $(or $(DATE),$(shell date +%F))
+
 .PHONY: run
-run: ## run the tech-lead loop (DATE=YYYY-MM-DD overrides today)
+run: import-jira ## run the tech-lead loop, importing Jira snapshot first (DATE=YYYY-MM-DD overrides today)
 	$(PYTHON) -m tl_agent.cli run --date $(or $(DATE),$(shell date +%F))
 
 .PHONY: web

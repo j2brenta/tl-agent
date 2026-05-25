@@ -38,7 +38,7 @@ class ResponseDraft(BaseModel):
     hotspot_id: str = Field(min_length=1)
     mode: ResponseMode
     target: str | None = None
-    body: str = Field(min_length=1, max_length=2000)
+    body: str = Field(min_length=0, max_length=2000, default="")
     # 800 (was 400): smaller local models tend to be more verbose; the
     # rationale is for TL audit, not display, so the cap exists only to
     # bound storage, not to enforce concision.

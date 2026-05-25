@@ -75,6 +75,8 @@ if [ "$DO_RESET" = 1 ]; then
   say "wiping SQLite state (--reset)"
   uv run python -m tl_agent.cli reset --confirm
   ok "state reset"
+  say "clearing Mattermost town-square posts"
+  make clean-mattermost
 fi
 
 # ---------- 3. seed everything ----------

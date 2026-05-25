@@ -20,7 +20,7 @@ class Hotspot(BaseModel):
 
     id: str = Field(min_length=1)
     type: FlagType
-    summary: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=500)
     severity: TriageStatus
     days_hot: int = Field(ge=1, default=1)
     engineer_ids: tuple[str, ...] = ()  # empty for team-wide
