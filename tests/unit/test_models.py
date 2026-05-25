@@ -112,6 +112,7 @@ def test_decision_round_trips_response_mode() -> None:
     d = Decision(
         id="d1",
         created_at=_now(),
+        run_date="2026-05-26",
         hotspot_id="h1",
         proposed_mode=ResponseMode.DM,
         proposed_body="hey, can we sync on ENG-12?",

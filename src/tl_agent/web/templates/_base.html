@@ -34,5 +34,22 @@
     <a href="http://localhost:6006">Traces (Phoenix)</a>
   </nav>
   {% block body %}{% endblock %}
+  <script>
+    // Rewrite every `<time datetime="...">` to the visitor's local TZ.
+    // The server emits ISO-8601 UTC; the browser knows the user's offset.
+    document.querySelectorAll("time[datetime]").forEach(function (el) {
+      var d = new Date(el.getAttribute("datetime"));
+      if (isNaN(d.getTime())) return;
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      var pad = function (n) { return String(n).padStart(2, "0"); };
+      var label = pad(d.getHours()) + ":" + pad(d.getMinutes());
+      // Preserve the YYYY-MM-DD prefix on rows that had one.
+      if (/^\d{4}-\d{2}-\d{2}/.test(el.textContent.trim())) {
+        label = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + label;
+      }
+      el.textContent = label + " " + tz;
+      el.title = "UTC: " + el.getAttribute("datetime");
+    });
+  </script>
 </body>
 </html>

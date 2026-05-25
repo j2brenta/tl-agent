@@ -139,7 +139,13 @@ CREATE INDEX IF NOT EXISTS ticket_snapshots_by_ticket ON ticket_snapshots(ticket
 -- Phase 8 audit log: every approval/rejection/edit.
 CREATE TABLE IF NOT EXISTS decisions (
     id              TEXT PRIMARY KEY,
+    -- Wall-clock UTC time the row was written. For audit.
     created_at      TEXT NOT NULL,
+    -- The run this decision belongs to (ctx.run_date.isoformat(),
+    -- YYYY-MM-DD). Distinct from created_at because `tl-agent run --date
+    -- X` may execute at any wall-clock time, and the brief filter must
+    -- bucket by intended run date, not by UTC midnight rollover.
+    run_date        TEXT NOT NULL,
     hotspot_id      TEXT NOT NULL,
     proposed_mode   TEXT NOT NULL,
     proposed_body   TEXT NOT NULL,
@@ -153,6 +159,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     needs_review    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS decisions_by_time   ON decisions(created_at);
+CREATE INDEX IF NOT EXISTS decisions_by_run    ON decisions(run_date, created_at);
 CREATE INDEX IF NOT EXISTS decisions_pending   ON decisions(tl_action, created_at);
 
 -- ---------- idempotency_keys ----------

@@ -79,6 +79,7 @@ async def run(
             decision = Decision(
                 id=f"d-{uuid.uuid4().hex[:12]}",
                 created_at=datetime.now(UTC),
+                run_date=ctx.run_date_iso,
                 hotspot_id=draft.hotspot_id,
                 proposed_mode=draft.mode,
                 proposed_body=body,

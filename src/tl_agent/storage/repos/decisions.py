@@ -12,10 +12,10 @@ def insert(conn: sqlite3.Connection, d: Decision) -> None:
     conn.execute(
         """
         INSERT INTO decisions (
-            id, created_at, hotspot_id, proposed_mode, proposed_body,
+            id, created_at, run_date, hotspot_id, proposed_mode, proposed_body,
             tl_action, tl_acted_at, final_body, final_target,
             trace_id, sent_message_id, sent_provider, needs_review
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             tl_action = excluded.tl_action,
             tl_acted_at = excluded.tl_acted_at,
@@ -27,6 +27,7 @@ def insert(conn: sqlite3.Connection, d: Decision) -> None:
         (
             d.id,
             d.created_at.isoformat(),
+            d.run_date,
             d.hotspot_id,
             d.proposed_mode.value,
             d.proposed_body,
@@ -43,9 +44,14 @@ def insert(conn: sqlite3.Connection, d: Decision) -> None:
 
 
 def _row_to_decision(row: sqlite3.Row) -> Decision:
+    keys = row.keys()
+    # Backfill from `date(created_at)` if a pre-migration row is missing
+    # run_date — keeps old decisions visible until the next reset.
+    run_date = row["run_date"] if "run_date" in keys else row["created_at"][:10]
     return Decision(
         id=row["id"],
         created_at=datetime.fromisoformat(row["created_at"]),
+        run_date=run_date,
         hotspot_id=row["hotspot_id"],
         proposed_mode=ResponseMode(row["proposed_mode"]),
         proposed_body=row["proposed_body"],
@@ -80,7 +86,7 @@ def list_pending(conn: sqlite3.Connection, *, run_date: str | None = None) -> li
     else:
         rows = conn.execute(
             "SELECT * FROM decisions WHERE tl_action IS NULL "
-            "AND date(created_at) = ? ORDER BY created_at ASC",
+            "AND run_date = ? ORDER BY created_at ASC",
             (run_date,),
         ).fetchall()
     return [_row_to_decision(r) for r in rows]
@@ -89,7 +95,7 @@ def list_pending(conn: sqlite3.Connection, *, run_date: str | None = None) -> li
 def list_recent(
     conn: sqlite3.Connection, *, limit: int = 50, run_date: str | None = None
 ) -> list[Decision]:
-    """Most recent decisions. `run_date` filters to one calendar day."""
+    """Most recent decisions. `run_date` filters to one run (YYYY-MM-DD)."""
     if run_date is None:
         rows = conn.execute(
             "SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?",
@@ -97,15 +103,15 @@ def list_recent(
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM decisions WHERE date(created_at) = ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM decisions WHERE run_date = ? ORDER BY created_at DESC LIMIT ?",
             (run_date, limit),
         ).fetchall()
     return [_row_to_decision(r) for r in rows]
 
 
 def list_run_dates(conn: sqlite3.Connection) -> list[str]:
-    """Distinct YYYY-MM-DD values that have at least one decision row."""
+    """Distinct run_date values that have at least one decision row."""
     rows = conn.execute(
-        "SELECT DISTINCT date(created_at) AS d FROM decisions ORDER BY d DESC"
+        "SELECT DISTINCT run_date AS d FROM decisions ORDER BY d DESC"
     ).fetchall()
     return [r["d"] for r in rows if r["d"]]

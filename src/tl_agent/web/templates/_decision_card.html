@@ -6,7 +6,10 @@
   <div>
     <span class="mode">{{ row.proposed_mode.value }}</span>
     <strong>{{ row.hotspot_id }}</strong>
-    <small>· created {{ row.created_at.strftime("%H:%M") }}</small>
+    <small>· created
+      <time datetime="{{ row.created_at.isoformat() }}">{{ row.created_at.strftime("%H:%M %Z") or row.created_at.strftime("%H:%M") + " UTC" }}</time>
+      <span style="color:#888">(run {{ row.run_date }})</span>
+    </small>
     {% if row.needs_review %}
     <span class="needs-review-tag"
           title="Phase 6 couldn't extract a clean draft (model omitted/malformed required fields). The body is salvage from the deep-dive; please review and edit before approving.">

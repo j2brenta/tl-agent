@@ -14,12 +14,13 @@
 {% else %}
 <table>
   <thead>
-    <tr><th>created</th><th>hotspot</th><th>mode</th><th>needs review?</th><th>action</th><th>sent</th></tr>
+    <tr><th>run</th><th>created (local)</th><th>hotspot</th><th>mode</th><th>needs review?</th><th>action</th><th>sent</th></tr>
   </thead>
   <tbody>
     {% for d in decisions %}
     <tr {% if d.needs_review %}style="background:#fff3e0"{% endif %}>
-      <td>{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td>{{ d.run_date }}</td>
+      <td><time datetime="{{ d.created_at.isoformat() }}">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</time></td>
       <td><code>{{ d.hotspot_id }}</code></td>
       <td>{{ d.proposed_mode.value }}</td>
       <td>{{ "⚠" if d.needs_review else "" }}</td>

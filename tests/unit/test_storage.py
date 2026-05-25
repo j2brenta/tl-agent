@@ -226,6 +226,7 @@ def test_decisions_pending_and_approve(db: sqlite3.Connection) -> None:
     d = Decision(
         id="d1",
         created_at=_now(),
+        run_date=_now().date().isoformat(),
         hotspot_id="h1",
         proposed_mode=ResponseMode.DM,
         proposed_body="hey john, ENG-12 looks stuck — true?",

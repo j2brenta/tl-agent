@@ -99,6 +99,16 @@ if [ "$DO_RESET" = 1 ]; then
   ok "state reset"
 fi
 
+# ---------- 3b. refresh commits anchored to the demo date ----------
+# GitLab's Files API stamps commits with wall-clock time at the API call —
+# the original seed ran at install time and those commits sit outside the
+# agent's [run_date - 24h, run_date] fetch window. Re-running with an
+# anchor namespaces the file paths so we get fresh commits whose
+# `committed_date` = now lands inside the demo window.
+say "anchoring fresh commits at $DEMO_DATE so they land in Phase 1's fetch window"
+COMMIT_ANCHOR_DATE="$DEMO_DATE" bash infra/gitlab/seed.sh
+ok "commits refreshed"
+
 # ---------- 4. post the demo standup as tl-admin ----------
 say "posting bulk standup for $DEMO_DATE as tl-admin"
 read -r -d '' STANDUP_BODY <<EOF || true

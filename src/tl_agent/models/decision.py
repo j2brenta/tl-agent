@@ -69,6 +69,9 @@ class Decision(BaseModel):
 
     id: str = Field(min_length=1)
     created_at: datetime
+    # ISO YYYY-MM-DD of the run that produced this decision; distinct from
+    # `created_at` so date-filtering survives runs that straddle UTC midnight.
+    run_date: str = Field(min_length=10, max_length=10)
     hotspot_id: str
     proposed_mode: ResponseMode
     proposed_body: str

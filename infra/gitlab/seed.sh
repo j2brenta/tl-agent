@@ -49,10 +49,20 @@ if [ -f "$(dirname "$0")/commits.yaml" ]; then
     echo "==> applying commits.yaml (idempotent)"
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+    # Optional: anchor commits to a specific date so each demo run produces
+    # fresh commits whose committed_date = now falls inside the agent's
+    # Phase 1 fetch window for that run_date.
+    ANCHOR_ARGS=()
+    if [ -n "${COMMIT_ANCHOR_DATE:-}" ]; then
+        ANCHOR_ARGS+=(--anchor-date "${COMMIT_ANCHOR_DATE}")
+    fi
+    # `${arr[@]+...}` guards expansion when the array is empty under `set -u`
+    # on macOS bash 3.2.
     (cd "$REPO_ROOT" && uv run python "${SCRIPT_DIR}/apply_commits.py" \
         --project "${PROJECT}" \
         --gitlab-url "${GITLAB_URL}" \
-        --token "${TOKEN}")
+        --token "${TOKEN}" \
+        ${ANCHOR_ARGS[@]+"${ANCHOR_ARGS[@]}"})
 fi
 
 echo "==> gitlab seed complete"
