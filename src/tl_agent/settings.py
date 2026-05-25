@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # observability
     otlp_endpoint: str = Field(default="http://localhost:6006/v1/traces")
     enable_jsonl_sink: bool = True
+    # When true, openinference-instrumentation-anthropic emits LLM I/O spans
+    # (request messages, system prompt, response text, tool_uses) so Phoenix
+    # can render the Conversation tab. Off by default because payloads can
+    # contain ticket bodies / names; opt in for debugging.
+    log_llm_payloads: bool = False
 
     # chat provider
     chat_provider: Literal["mattermost", "slack"] = "mattermost"

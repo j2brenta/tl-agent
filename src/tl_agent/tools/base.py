@@ -152,6 +152,13 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     kind=ToolErrorKind.VALIDATION,
                     message=f"input validation failed for {self.name}: {exc}",
                 )
+                logger.warning(
+                    "tool.failed tool=%s kind=%s attempt=0 args=%s msg=%s",
+                    self.name,
+                    err.kind.value,
+                    _summarise_raw(raw_args),
+                    err.message,
+                )
                 _record_tool_error(span, exc, err, attempts=0)
                 return err
 
@@ -187,8 +194,12 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                         await asyncio.sleep(self.retry_policy.sleep_for(attempt))
                         continue
                     logger.warning(
-                        "tool.failed",
-                        extra={"tool": self.name, "kind": err.kind.value, "attempt": attempt},
+                        "tool.failed tool=%s kind=%s attempt=%d args=%s msg=%s",
+                        self.name,
+                        err.kind.value,
+                        attempt,
+                        _summarise_args(args),
+                        err.message,
                     )
                     _record_tool_error(span, ex, err, attempts=attempt)
                     return err
@@ -200,6 +211,14 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     if self.retry_policy.should_retry(err, attempt):
                         await asyncio.sleep(self.retry_policy.sleep_for(attempt))
                         continue
+                    logger.warning(
+                        "tool.failed tool=%s kind=%s attempt=%d args=%s msg=%s",
+                        self.name,
+                        err.kind.value,
+                        attempt,
+                        _summarise_args(args),
+                        err.message,
+                    )
                     _record_tool_error(span, exc, err, attempts=attempt)
                     return err
 
@@ -266,6 +285,27 @@ class ToolException(Exception):
 
 def _default_retriable(kind: ToolErrorKind) -> bool:
     return kind in {ToolErrorKind.RATE_LIMIT, ToolErrorKind.UPSTREAM_5XX, ToolErrorKind.TIMEOUT}
+
+
+_ARGS_MAX_CHARS = 240
+
+
+def _summarise_args(args: BaseModel) -> str:
+    """Compact one-line repr of validated tool args for log lines."""
+    try:
+        text = args.model_dump_json()
+    except Exception:
+        text = repr(args)
+    return text if len(text) <= _ARGS_MAX_CHARS else text[:_ARGS_MAX_CHARS] + "…"
+
+
+def _summarise_raw(raw: object) -> str:
+    """Compact repr of pre-validation raw args (may not be a BaseModel)."""
+    try:
+        text = json.dumps(raw, default=str, sort_keys=True)
+    except Exception:
+        text = repr(raw)
+    return text if len(text) <= _ARGS_MAX_CHARS else text[:_ARGS_MAX_CHARS] + "…"
 
 
 def _record_tool_error(span: object, exc: BaseException, err: ToolError, *, attempts: int) -> None:

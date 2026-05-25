@@ -65,5 +65,42 @@ def run(
             console.print(f"  - {n}")
 
 
+@app.command()
+def reset(
+    confirm: Annotated[
+        bool,
+        typer.Option("--confirm", help="required — refuses to run without it"),
+    ] = False,
+    db_path: Annotated[
+        str,
+        typer.Option("--path", help="override DB path (defaults to settings.sqlite_path)"),
+    ] = "",
+) -> None:
+    """Delete the SQLite state file and re-apply schema.sql."""
+    from pathlib import Path
+
+    from tl_agent.settings import get_settings
+    from tl_agent.storage.db import connect, initialize
+
+    if not confirm:
+        console.print("[red]refusing to reset without --confirm[/red]")
+        raise typer.Exit(code=2)
+
+    target = Path(db_path) if db_path else get_settings().sqlite_path
+    if target.exists():
+        target.unlink()
+        console.print(f"deleted {target}")
+    else:
+        console.print(f"[dim]no db at {target} — creating fresh[/dim]")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect(target)
+    try:
+        initialize(conn)
+    finally:
+        conn.close()
+    console.print(f"[green]re-applied schema at {target}[/green]")
+
+
 if __name__ == "__main__":
     app()

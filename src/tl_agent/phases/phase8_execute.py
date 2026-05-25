@@ -98,8 +98,10 @@ async def execute_decision(
 
     if isinstance(send_result, ToolError):
         logger.warning(
-            "phase8.send_failed",
-            extra={"decision": decision_id, "kind": send_result.kind.value},
+            "phase8.send_failed decision=%s kind=%s msg=%s",
+            decision_id,
+            send_result.kind.value,
+            send_result.message,
         )
         # Persist the attempt so the UI can show the failure; do NOT mark sent_message_id.
         updated = decision.model_copy(
@@ -128,8 +130,10 @@ async def execute_decision(
         )
     except Exception as exc:
         logger.warning(
-            "phase8.readback_failed",
-            extra={"decision": decision_id, "err": str(exc)},
+            "phase8.readback_failed decision=%s err_type=%s err=%s",
+            decision_id,
+            type(exc).__name__,
+            exc,
         )
         # Note: idempotency cache was already written by the writer — a manual
         # retry against the same key will hit the cache, which is the documented

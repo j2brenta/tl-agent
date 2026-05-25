@@ -64,3 +64,4 @@ evals/reports/*.json
 
 # Exported Claude Code conversation transcripts (created by /export)
 *-local-command-caveat*.txt
+*-what-are-the*.txt

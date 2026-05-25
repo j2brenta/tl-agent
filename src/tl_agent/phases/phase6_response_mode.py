@@ -37,7 +37,13 @@ async def run(ctx: RunContext, *, deep_dives: list[DeepDive]) -> list[ResponseDr
                 phase="phase6_response_mode",
             )
         except Exception as exc:
-            logger.warning("phase6.failed", extra={"err": str(exc), "hotspot": dd.hotspot.id})
+            logger.warning(
+                "phase6.failed hotspot=%s severity=%s err_type=%s err=%s",
+                dd.hotspot.id,
+                dd.hotspot.severity.value,
+                type(exc).__name__,
+                exc,
+            )
             draft = ResponseDraft(
                 hotspot_id=dd.hotspot.id,
                 mode=ResponseMode.NOTE,

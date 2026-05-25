@@ -61,10 +61,37 @@ def init_tracing(*, service_name: str = "tl-agent", force: bool = False) -> None
         provider.add_span_processor(JsonlSpanProcessor(base_dir=settings.traces_dir))
 
     trace.set_tracer_provider(provider)
+
+    # Optional: full LLM request/response capture via OpenInference. Off by
+    # default because payloads can contain ticket bodies. Turned on via
+    # TLA_LOG_LLM_PAYLOADS=1; Phoenix then renders a Conversation tab.
+    if settings.log_llm_payloads:
+        _instrument_anthropic_payloads()
+
     _initialised = True
     logger.info(
-        "tracing initialised", extra={"service": service_name, "otlp": settings.otlp_endpoint}
+        "tracing initialised",
+        extra={
+            "service": service_name,
+            "otlp": settings.otlp_endpoint,
+            "log_llm_payloads": settings.log_llm_payloads,
+        },
     )
+
+
+def _instrument_anthropic_payloads() -> None:
+    """Idempotently enable OpenInference auto-instrumentation for the Anthropic SDK."""
+    try:
+        from openinference.instrumentation.anthropic import AnthropicInstrumentor
+    except ImportError:
+        logger.warning(
+            "log_llm_payloads=true but openinference-instrumentation-anthropic "
+            "is not installed; LLM payloads will not be recorded"
+        )
+        return
+    instrumentor = AnthropicInstrumentor()
+    if not instrumentor.is_instrumented_by_opentelemetry:
+        instrumentor.instrument()
 
 
 def tracer() -> Tracer:

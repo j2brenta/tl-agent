@@ -41,7 +41,10 @@ async def run(ctx: RunContext, signals: DailySignals) -> list[EngineerTriage]:
             )
         except Exception as exc:
             logger.warning(
-                "phase2.engineer_failed", extra={"engineer": engineer_id, "err": str(exc)}
+                "phase2.engineer_failed engineer=%s err_type=%s err=%s",
+                engineer_id,
+                type(exc).__name__,
+                exc,
             )
             return EngineerTriage(
                 engineer_id=engineer_id,

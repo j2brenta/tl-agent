@@ -70,8 +70,11 @@ async def run(
                     body = composed.body
                 except Exception as exc:
                     logger.warning(
-                        "phase7.compose_failed",
-                        extra={"hotspot": draft.hotspot_id, "err": str(exc)},
+                        "phase7.compose_failed hotspot=%s mode=%s err_type=%s err=%s",
+                        draft.hotspot_id,
+                        draft.mode.value,
+                        type(exc).__name__,
+                        exc,
                     )
             decision = Decision(
                 id=f"d-{uuid.uuid4().hex[:12]}",

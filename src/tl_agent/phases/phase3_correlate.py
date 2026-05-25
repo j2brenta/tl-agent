@@ -45,7 +45,7 @@ async def run(
             phase="phase3_correlate",
         )
     except Exception as exc:
-        logger.warning("phase3.failed", extra={"err": str(exc)})
+        logger.warning("phase3.failed err_type=%s err=%s", type(exc).__name__, exc)
         return []
     ctx.budget.spend(usage)
     return list(result.hotspots)

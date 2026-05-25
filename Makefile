@@ -93,6 +93,11 @@ seed: ## seed GitLab + Jira mock + Mattermost + SQLite baselines
 	bash infra/gitlab/seed.sh
 	$(PYTHON) -m tl_agent.storage.db --init
 
+.PHONY: reset-state
+reset-state: ## wipe SQLite state, re-apply schema, then re-seed
+	$(PYTHON) -m tl_agent.cli reset --confirm
+	$(MAKE) seed
+
 .PHONY: snapshot
 snapshot: ## pg_dump mattermost-postgres → fixtures/mattermost.dump (eval baseline)
 	bash infra/mattermost/snapshot.sh dump
