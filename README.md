@@ -277,4 +277,4 @@ the Phoenix UI at `localhost:6006`.
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE)
