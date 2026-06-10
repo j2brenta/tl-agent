@@ -31,6 +31,9 @@ uv.lock
 *~
 .DS_Store
 
+# Local notes / scratch docs (not part of the published repo)
+docs/
+
 # Runtime / data
 *.db
 *.db-journal

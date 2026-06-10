@@ -30,8 +30,26 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Process-wide startup/shutdown — sets up OTel exactly once."""
+    """Process-wide startup/shutdown — sets up OTel and ensures the schema.
+
+    The schema-ensure mirrors `phases.orchestrator.run`: it makes the web UI
+    self-healing on a fresh deployment (e.g. the containerised path, where the
+    bind-mounted `data/` starts empty) instead of 500ing with "no such table".
+    `initialize` is idempotent — schema.sql is all `CREATE … IF NOT EXISTS`.
+    """
+    from tl_agent.settings import get_settings
+    from tl_agent.storage import connect, initialize
+
     init_tracing(service_name="tl-agent-web")
+
+    db_path = get_settings().sqlite_path
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect(db_path)
+    try:
+        initialize(conn)
+    finally:
+        conn.close()
+
     yield
 
 
