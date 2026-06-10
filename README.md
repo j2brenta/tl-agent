@@ -32,6 +32,61 @@ See `make help` for individual targets (`make check`, `make eval-quick`,
 
 ---
 
+## Run it as a container (and pick your configuration)
+
+The agent ships as a Docker image (`Dockerfile`) and runs inside the same
+compose network as its dependencies. Each integration — **chat, Jira,
+GitLab** — is independent: run the bundled mock, or point at the real thing
+by setting that service's URL + token in `.env` and skipping its profile.
+Nothing is hardcoded; the switch is config-only.
+
+```bash
+make build-image            # build tl-agent:local
+
+# Everything bundled (mock Mattermost + mock Jira + real-ish GitLab CE):
+make up-bundled             # boots mocks + agent + web UI
+make run-docker DATE=2026-06-10   # run the 8-phase loop in a container
+open http://localhost:8080  # Phase 8 review UI (web service)
+
+# Mix: mock Mattermost, but REAL Jira + GitLab —
+#   1. in .env: uncomment + set TLA_JIRA_BASE_URL/TLA_JIRA_TOKEN and
+#      TLA_GITLAB_BASE_URL/TLA_GITLAB_TOKEN
+#   2. boot only the chat mock:
+make up-mock-chat
+make run-docker DATE=2026-06-10
+
+# All real (Slack + real Jira + real GitLab) — only the agent + Phoenix boot:
+make up-real
+make run-docker DATE=2026-06-10
+```
+
+### Configuration matrix
+
+| Goal | Profiles (`make up PROFILES=…` / preset) | Set in `.env` |
+|---|---|---|
+| Everything bundled (demo) | `mattermost,jira,gitlab,agent` (`make up-bundled`) | nothing — defaults |
+| Mock chat, real Jira + GitLab | `mattermost,agent` (`make up-mock-chat`) | `TLA_JIRA_BASE_URL`+`TLA_JIRA_TOKEN`, `TLA_GITLAB_BASE_URL`+`TLA_GITLAB_TOKEN` |
+| Real Slack + real Jira + GitLab | `agent` (`make up-real`) | `TLA_CHAT_PROVIDER=slack`, `TLA_SLACK_*`, `TLA_JIRA_*`, `TLA_GITLAB_*` |
+| Run agent on the host instead | `mattermost,jira,gitlab` (`make up`) | (host defaults to `localhost`) |
+
+How it works: the `agent`/`web` services layer two env files — first
+`infra/agent.defaults.env` (sibling-container DNS like `http://jira_mock:9100`),
+then your `.env` on top. Any URL you set in `.env` wins; any you leave unset
+falls back to the bundled container. Phoenix (tracing) always runs.
+
+> **Migrating an existing `.env`:** the URL lines (`TLA_*_BASE_URL`,
+> `TLA_MATTERMOST_URL`, `TLA_OTLP_ENDPOINT`, `TLA_OLLAMA_BASE_URL`) are now
+> **commented out** in `.env.example`. If yours still sets them to
+> `localhost`, comment them out (or re-copy `.env.example`) so the container
+> picks up the in-network DNS names. Host runs are unaffected — they default
+> to `localhost` either way.
+
+Seeding the mocks (`make seed`) and the all-in-one `make demo` still run on
+the host (they `docker exec` / `curl` the mock services); the **agent
+application** is what's containerised.
+
+---
+
 ## Service tokens for `.env`
 
 `make env` copies `.env.example` → `.env`. Everything is namespaced `TLA_*`.
@@ -121,9 +176,10 @@ Mattermost runs in `docker compose` so every PR exercises real REST, real
 webhook signature verification (`services/mattermost_seed/webhook_target.py`),
 and real OAuth refresh — the senior-signal parts. Slack uses the official
 SDK and is wired but not test-gated (we don't seed a real workspace in CI).
-To flip primary: set `provider: slack` in `config/chat.yaml`, set
-`SLACK_BOT_TOKEN`, drop the `skip-integration` marker on the chat tests.
-~half a day.
+To flip primary: set `TLA_CHAT_PROVIDER=slack` in `.env`, set
+`TLA_SLACK_BOT_TOKEN` + `TLA_SLACK_SIGNING_SECRET`, drop the
+`skip-integration` marker on the chat tests. ~half a day. (Allowed channel
+slugs live in `config/chat_channels.yaml`.)
 
 ### Mock Jira, real GitLab
 

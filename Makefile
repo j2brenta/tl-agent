@@ -67,11 +67,29 @@ test: ## all tests including integration (needs `make up`)
 # -------------------- compose --------------------
 COMPOSE := docker compose -f infra/docker-compose.yml
 
+# Which service profiles to boot. Override per-invocation, e.g.
+#   make up PROFILES=mattermost          # mock chat only; real Jira+GitLab via .env
+#   make up PROFILES=                     # nothing but Phoenix (all real)
+# Named presets below wrap the common combinations.
+PROFILES ?= mattermost,jira,gitlab
+
 .PHONY: up
-up: ## bring compose stack up + wait healthchecks
-	$(COMPOSE) up -d
-	@echo "==> waiting for healthchecks..."
-	@bash infra/wait_healthy.sh
+up: ## bring compose stack up + wait healthchecks (PROFILES= overrides services)
+	COMPOSE_PROFILES="$(PROFILES)" $(COMPOSE) up -d
+	@echo "==> waiting for healthchecks (profiles: $(PROFILES))..."
+	@COMPOSE_PROFILES="$(PROFILES)" bash infra/wait_healthy.sh
+
+.PHONY: up-bundled
+up-bundled: ## preset: everything in containers (mock MM+Jira+GitLab + agent)
+	$(MAKE) up PROFILES=mattermost,jira,gitlab,agent
+
+.PHONY: up-mock-chat
+up-mock-chat: ## preset: mock Mattermost only; point TLA_JIRA_*/TLA_GITLAB_* at real
+	$(MAKE) up PROFILES=mattermost,agent
+
+.PHONY: up-real
+up-real: ## preset: only agent + Phoenix; all integrations real (Slack/Jira/GitLab via .env)
+	$(MAKE) up PROFILES=agent
 
 .PHONY: down
 down: ## tear down compose stack (keeps volumes)
@@ -130,8 +148,27 @@ run: import-jira ## run the team lead loop, importing Jira snapshot first (DATE=
 	$(PYTHON) -m tl_agent.cli run --date $(or $(DATE),$(shell date +%F))
 
 .PHONY: web
-web: ## start Phase 8 review UI on :8080
+web: ## start Phase 8 review UI on :8080 (host)
 	uv run uvicorn tl_agent.web.app:app --reload --host 0.0.0.0 --port 8080
+
+# -------------------- containerised agent --------------------
+.PHONY: build-image
+build-image: ## build the tl-agent application image
+	$(COMPOSE) build agent
+
+.PHONY: run-docker
+run-docker: ## run the 8-phase loop in a container (DATE=YYYY-MM-DD overrides today)
+	COMPOSE_PROFILES="$(PROFILES),agent" $(COMPOSE) run --rm agent \
+		run --date $(or $(DATE),$(shell date +%F))
+
+.PHONY: web-docker
+web-docker: ## start the Phase 8 review UI in a container on :8080
+	COMPOSE_PROFILES="$(PROFILES),agent" $(COMPOSE) up -d web
+	@echo "==> review UI at http://localhost:8080"
+
+.PHONY: cli-docker
+cli-docker: ## run an arbitrary CLI subcommand in a container, e.g. `make cli-docker ARGS='status'`
+	COMPOSE_PROFILES="$(PROFILES),agent" $(COMPOSE) run --rm agent $(ARGS)
 
 .PHONY: demo
 demo: ## end-to-end demo (up + seed + post standup + run); DATE= overrides

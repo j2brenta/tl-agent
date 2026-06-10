@@ -1,0 +1,41 @@
+# Keep the build context small and deterministic. The image needs only
+# pyproject.toml, README.md, src/, config/, prompts/ (see Dockerfile).
+
+.git
+.github
+.venv
+venv
+env
+**/__pycache__
+*.py[cod]
+.mypy_cache
+.pyright
+.ruff_cache
+.pytest_cache
+.coverage
+htmlcov
+
+# Secrets + local state — injected at runtime via env, never baked in.
+.env
+.env.local
+*.pem
+data/
+traces/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Not needed in the app image.
+tests
+evals
+mcp
+infra
+services
+scripts
+docs
+*.txt
+*.md
+!README.md
+.claude
+uv.lock

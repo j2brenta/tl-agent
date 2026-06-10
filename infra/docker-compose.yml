@@ -11,7 +11,25 @@
 # Conventions:
 #   - Every long-lived service has a healthcheck.
 #   - Volumes named with `tla_` prefix for grep-ability.
-#   - Ports stable: GitLab 8929, Mattermost 8065, Phoenix 6006, jira_mock 9100.
+#   - Ports stable: GitLab 8929, Mattermost 8065, Phoenix 6006, jira_mock 9100,
+#     agent web UI 8080.
+#
+# Per-service profiles (mix and match — boot only the mocks you need):
+#   mattermost  → Mattermost + its Postgres   (skip when using real Slack/MM)
+#   jira        → jira_mock                    (skip when pointing at real Jira)
+#   gitlab      → GitLab CE                     (skip when pointing at real GitLab)
+#   agent       → the tl-agent app + web UI
+#   local       → Ollama (local LLM)
+# Phoenix has no profile — observability is always on.
+#
+# Examples:
+#   # everything bundled (the demo):
+#   COMPOSE_PROFILES=mattermost,jira,gitlab,agent docker compose up -d
+#   # mock Mattermost, but real Jira + GitLab (set TLA_JIRA_*/TLA_GITLAB_* in .env):
+#   COMPOSE_PROFILES=mattermost,agent docker compose up -d
+#   # all real (Slack + real Jira + real GitLab) — only the agent + Phoenix boot:
+#   COMPOSE_PROFILES=agent docker compose up -d
+# The Makefile wraps these as `make up PROFILES=...` and named presets.
 #
 # Apple Silicon notes:
 #   - GitLab CE does NOT publish arm64 images. Set:
@@ -25,6 +43,7 @@ services:
     # Override on arm64 hosts via TLA_GITLAB_IMAGE (see top-of-file note).
     image: ${TLA_GITLAB_IMAGE:-gitlab/gitlab-ce:17.5.0-ce.0}
     container_name: tla-gitlab
+    profiles: ["gitlab"]
     restart: unless-stopped
     hostname: gitlab.local
     ports:
@@ -52,6 +71,7 @@ services:
   mattermost-db:
     image: postgres:16-alpine
     container_name: tla-mm-db
+    profiles: ["mattermost"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: mmuser
@@ -68,6 +88,7 @@ services:
   mattermost:
     image: mattermost/mattermost-team-edition:10.1.2
     container_name: tla-mattermost
+    profiles: ["mattermost"]
     restart: unless-stopped
     depends_on:
       mattermost-db:
@@ -99,6 +120,7 @@ services:
     build:
       context: ../services/jira_mock
     container_name: tla-jira-mock
+    profiles: ["jira"]
     restart: unless-stopped
     ports:
       - "9100:9100"
@@ -120,6 +142,69 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+
+  # --- the tl-agent application ------------------------------------------
+  #
+  # `agent` is a one-shot runner: invoke CLI subcommands with
+  #   docker compose run --rm agent run --date 2026-06-10
+  # `web` is the long-lived Phase 8 review UI on :8080.
+  #
+  # Both share one image (built once) and the same env wiring below. Env is
+  # layered: agent.defaults.env supplies the sibling-container DNS URLs, then
+  # ../.env is layered on top — so ANY URL you set (uncomment) in .env wins.
+  # That ordering IS the mock-vs-real switch: leave TLA_JIRA_BASE_URL unset →
+  # the bundled jira_mock; set it (+ TLA_JIRA_TOKEN) → your real Jira, and you
+  # just don't run the `jira` profile. Same for GitLab and chat
+  # (TLA_CHAT_PROVIDER=slack + TLA_SLACK_*). We layer env_files rather than use
+  # ${VAR:-default} interpolation because compose resolves interpolation
+  # against infra/.env (the compose-file dir), not the repo-root .env.
+  agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: tl-agent:local
+    container_name: tla-agent
+    profiles: ["agent"]
+    env_file: &agent_env_file
+      - ./agent.defaults.env       # sibling-container DNS defaults (loaded first)
+      - path: ../.env              # your tokens + real-endpoint overrides (wins)
+        required: false
+    volumes: &agent_volumes
+      - ../data:/app/data        # SQLite state (writable)
+      - ../traces:/app/traces    # JSONL span dump (writable)
+      - ../config:/app/config    # LAYER 1 markdown — live edits without rebuild
+      - ../prompts:/app/prompts  # versioned prompts — live edits without rebuild
+    command: ["--help"]
+
+  web:
+    image: tl-agent:local
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: tla-web
+    profiles: ["agent"]
+    env_file: *agent_env_file
+    volumes: *agent_volumes
+    entrypoint: []  # override the `tl-agent` entrypoint to run uvicorn
+    command:
+      - uvicorn
+      - tl_agent.web.app:app
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=2).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 10
       start_period: 10s
 
   phoenix:
