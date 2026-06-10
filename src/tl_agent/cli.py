@@ -8,13 +8,22 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date as date_cls
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from tl_agent import __version__
+
+
+def _opt(*param_decls: str, **kwargs: Any) -> Any:
+    """typer.Option wrapper — typer's overloaded stub reports Any, which trips
+    pyright strict's reportUnknownMemberType at every call site. Funnelling
+    through one explicitly-typed helper clears the noise while keeping the
+    global check live for the rest of the module."""
+    return typer.Option(*param_decls, **kwargs)  # pyright: ignore[reportUnknownMemberType]
+
 
 app = typer.Typer(
     name="tl-agent",
@@ -35,11 +44,11 @@ def version() -> None:
 def run(
     run_date: Annotated[
         str,
-        typer.Option("--date", help="ISO date for the run (defaults to today)"),
+        _opt("--date", help="ISO date for the run (defaults to today)"),
     ] = "",
     verbose: Annotated[
         bool,
-        typer.Option("--verbose/--quiet", help="Stream phase progress + tool calls to stderr"),
+        _opt("--verbose/--quiet", help="Stream phase progress + tool calls to stderr"),
     ] = True,
 ) -> None:
     """Run the full 8-phase tech-lead loop for the given date."""
@@ -138,7 +147,7 @@ def _print_router_summary() -> None:
 def init_db(
     db_path: Annotated[
         str,
-        typer.Option("--path", help="override DB path (defaults to settings.sqlite_path)"),
+        _opt("--path", help="override DB path (defaults to settings.sqlite_path)"),
     ] = "",
 ) -> None:
     """Apply schema.sql to the SQLite DB, creating it if missing (idempotent)."""
@@ -161,7 +170,7 @@ def init_db(
 def status(
     run_date: Annotated[
         str,
-        typer.Option("--date", help="ISO date to inspect (defaults to most recent run)"),
+        _opt("--date", help="ISO date to inspect (defaults to most recent run)"),
     ] = "",
 ) -> None:
     """Show what phase 1 collected in the last run: commits, standups, tickets."""
@@ -193,8 +202,8 @@ def status(
     table.add_column("run id")
 
     for r in rows:
-        notes = json.loads(r["notes"]) if r["notes"] else {}
-        sig = notes.get("signals", {})
+        notes: dict[str, Any] = json.loads(r["notes"]) if r["notes"] else {}
+        sig: dict[str, Any] = notes.get("signals", {})
         dates = ", ".join(sig.get("commit_dates", []) or []) or "—"
         table.add_row(
             r["run_date"],
@@ -213,7 +222,7 @@ def status(
 def import_jira(
     run_date: Annotated[
         str,
-        typer.Option("--date", help="ISO date to snapshot against (defaults to today)"),
+        _opt("--date", help="ISO date to snapshot against (defaults to today)"),
     ] = "",
 ) -> None:
     """Pull the active sprint from Jira and save a ticket snapshot for the given date."""
@@ -248,11 +257,11 @@ def import_jira(
 def reset(
     confirm: Annotated[
         bool,
-        typer.Option("--confirm", help="required — refuses to run without it"),
+        _opt("--confirm", help="required — refuses to run without it"),
     ] = False,
     db_path: Annotated[
         str,
-        typer.Option("--path", help="override DB path (defaults to settings.sqlite_path)"),
+        _opt("--path", help="override DB path (defaults to settings.sqlite_path)"),
     ] = "",
 ) -> None:
     """Delete the SQLite state file and re-apply schema.sql."""

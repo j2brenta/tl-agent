@@ -7,6 +7,7 @@ import json
 import sqlite3
 from datetime import date as date_
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -42,9 +43,9 @@ async def runs_fragment(date: str | None = None) -> HTMLResponse:
         (selected,),
     ).fetchall()
 
-    runs = []
+    runs: list[dict[str, Any]] = []
     for r in rows:
-        notes = {}
+        notes: dict[str, Any] = {}
         if r["notes"]:
             with contextlib.suppress(Exception):
                 notes = json.loads(r["notes"])

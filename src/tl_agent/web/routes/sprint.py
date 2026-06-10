@@ -88,7 +88,7 @@ async def sprint(date: str | None = None) -> HTMLResponse:
             team_flags.append(flag)
 
     # Build per-engineer rows
-    engineers_data = []
+    engineers_data: list[dict[str, Any]] = []
     for eng in team.engineers:
         eng_tickets = [t for t in tickets if t.assignee == eng.id]
         eng_flags = flags_by_eng.get(eng.id, [])

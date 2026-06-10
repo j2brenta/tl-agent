@@ -23,7 +23,7 @@ import hashlib
 import hmac
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -152,7 +152,8 @@ class MattermostProvider(ChatProvider):
             except httpx.HTTPError as exc:
                 raise_from_transport_error(exc, tool_label=f"{self.name}.get_messages")
         data = r.json()
-        return [_to_message(p, resolved_id) for p in (data.get("posts") or {}).values()]
+        posts = cast(dict[str, Any], data.get("posts") or {})
+        return [_to_message(p, resolved_id) for p in posts.values()]
 
     async def get_message(self, *, channel_id: str, message_id: str) -> ChatMessage | None:
         async with _client() as client:

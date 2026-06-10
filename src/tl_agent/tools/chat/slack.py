@@ -25,7 +25,7 @@ import hashlib
 import hmac
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -54,16 +54,31 @@ class SlackProvider(ChatProvider):
         self._client = AsyncWebClient(token=s.slack_bot_token)
         self._signing_secret = s.slack_signing_secret.encode("utf-8")
 
+    # ---------- client helpers ----------
+    # The AsyncWebClient methods carry `**kwargs: Unknown` in their stubs, which
+    # trips pyright strict's reportUnknownMemberType at every call site. Funnel
+    # them through explicitly-typed helpers (one documented ignore each) so the
+    # global check stays live for the rest of the module.
+
+    async def _conversations_open(self, *, users: list[str]) -> Any:
+        return await self._client.conversations_open(users=users)  # pyright: ignore[reportUnknownMemberType]
+
+    async def _post_message(self, *, channel: str, text: str) -> Any:
+        return await self._client.chat_postMessage(channel=channel, text=text)  # pyright: ignore[reportUnknownMemberType]
+
+    async def _conversations_history(self, **kwargs: Any) -> Any:
+        return await self._client.conversations_history(**kwargs)  # pyright: ignore[reportUnknownMemberType]
+
     # ---------- post ----------
 
     async def post_dm(self, *, user_id: str, body: str) -> PostResult:
-        open_resp = await self._client.conversations_open(users=[user_id])
-        channel = open_resp.get("channel") or {}
+        open_resp = await self._conversations_open(users=[user_id])
+        channel = cast(dict[str, Any], open_resp.get("channel") or {})
         channel_id = str(channel["id"])
         return await self.post_channel(channel_id=channel_id, body=body)
 
     async def post_channel(self, *, channel_id: str, body: str) -> PostResult:
-        resp = await self._client.chat_postMessage(channel=channel_id, text=body)
+        resp = await self._post_message(channel=channel_id, text=body)
         ts = str(resp["ts"])
         return PostResult(
             provider=self.name,
@@ -78,7 +93,7 @@ class SlackProvider(ChatProvider):
     async def get_messages(
         self, *, channel_id: str, since: datetime, until: datetime, limit: int = 100
     ) -> list[ChatMessage]:
-        resp = await self._client.conversations_history(
+        resp = await self._conversations_history(
             channel=channel_id,
             oldest=str(since.timestamp()),
             latest=str(until.timestamp()),
@@ -88,7 +103,7 @@ class SlackProvider(ChatProvider):
         return [_to_message(m, channel_id) for m in messages]
 
     async def get_message(self, *, channel_id: str, message_id: str) -> ChatMessage | None:
-        resp = await self._client.conversations_history(
+        resp = await self._conversations_history(
             channel=channel_id, latest=message_id, inclusive=True, limit=1
         )
         messages: list[dict[str, Any]] = list(resp.get("messages", []))

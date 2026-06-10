@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -91,11 +92,11 @@ def load_markdown(name: str, config_dir: Path | None = None) -> str:
 
 @lru_cache(maxsize=8)
 def _load_allowlist(path: Path, key: str) -> frozenset[str]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    values = data.get(key) or []
+    data = cast(dict[str, Any], yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+    values: Any = data.get(key) or []
     if not isinstance(values, list):
         raise ValueError(f"{path}: key {key!r} must be a list, got {type(values).__name__}")
-    return frozenset(str(v) for v in values)
+    return frozenset(str(v) for v in cast(list[Any], values))  # type: ignore[redundant-cast]
 
 
 def load_allowed_chat_channels(config_dir: Path | None = None) -> frozenset[str]:

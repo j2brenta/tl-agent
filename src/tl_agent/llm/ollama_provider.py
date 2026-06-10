@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -218,7 +218,9 @@ class OllamaProvider(Provider):
                 latency_ms=latency_ms,
             )
 
-        raw_content = (data.get("message") or {}).get("content") or ""
+        raw_content = cast(
+            str, (cast(dict[str, Any], data.get("message")) or {}).get("content") or ""
+        )
         content = _strip_thinking(raw_content).strip()
         if not content:
             return None, usage
@@ -307,18 +309,22 @@ def _tool_to_openai(t: dict[str, Any]) -> dict[str, Any]:
 
 
 def _parse_choices(data: dict[str, Any]) -> tuple[str, tuple[ToolUseBlock, ...], StopReason]:
-    choice = data["choices"][0]
-    msg = choice.get("message", {})
-    text: str = msg.get("content") or ""
+    choice = cast(dict[str, Any], data["choices"][0])
+    msg = cast(dict[str, Any], choice.get("message", {}))
+    text: str = cast(str, msg.get("content") or "")
     tool_uses: list[ToolUseBlock] = []
-    for tc in msg.get("tool_calls") or []:
-        fn = tc.get("function", {})
+    for tc in cast(list[Any], msg.get("tool_calls") or []):
+        fn = cast(dict[str, Any], tc.get("function", {}))
         try:
-            args = json.loads(fn.get("arguments") or "{}")
+            args: dict[str, Any] = json.loads(cast(str, fn.get("arguments") or "{}"))
         except json.JSONDecodeError:
             args = {}
-        tool_uses.append(ToolUseBlock(id=tc.get("id", ""), name=fn.get("name", ""), input=args))
-    finish = choice.get("finish_reason") or "stop"
+        tool_uses.append(
+            ToolUseBlock(
+                id=cast(str, tc.get("id", "")), name=cast(str, fn.get("name", "")), input=args
+            )
+        )
+    finish = cast(str, choice.get("finish_reason") or "stop")
     stop_reason: StopReason = (
         "tool_use"
         if finish == "tool_calls"
@@ -332,10 +338,10 @@ def _parse_choices(data: dict[str, Any]) -> tuple[str, tuple[ToolUseBlock, ...],
 
 
 def _to_token_usage(data: dict[str, Any]) -> TokenUsage:
-    u = data.get("usage", {}) or {}
+    u = cast(dict[str, Any], data.get("usage", {}) or {})
     return TokenUsage(
-        input_tokens=int(u.get("prompt_tokens", 0) or 0),
-        output_tokens=int(u.get("completion_tokens", 0) or 0),
+        input_tokens=int(cast(int, u.get("prompt_tokens", 0) or 0)),
+        output_tokens=int(cast(int, u.get("completion_tokens", 0) or 0)),
         cache_read_tokens=0,
         cache_creation_tokens=0,
         cost_usd=0.0,

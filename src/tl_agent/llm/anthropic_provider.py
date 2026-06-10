@@ -110,7 +110,7 @@ class AnthropicProvider(Provider):
         with llm_span(req.model, phase=req.phase):
             start = time.perf_counter()
             try:
-                msg = await self._client.messages.create(**kwargs)
+                msg = cast("AnthMessage", await self._client.messages.create(**kwargs))
             except APIStatusError as exc:
                 raise ProviderError(
                     f"anthropic API error: {exc.status_code} {exc.message}",

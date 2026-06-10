@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from tl_agent.agent.stop_conditions import StopConditions, StopReason
 from tl_agent.agent.verifier import (
@@ -267,7 +267,7 @@ def _to_tool_result_block(tool_use_id: str, result: object) -> ToolResultBlock:
     """Convert BaseTool.invoke output into the Anthropic-style result block."""
     if isinstance(result, ToolResult):
         try:
-            content = result.value.model_dump_json()
+            content = cast(ToolResult[Any], result).value.model_dump_json()  # type: ignore[redundant-cast]
         except Exception as exc:
             return ToolResultBlock(
                 tool_use_id=tool_use_id,
