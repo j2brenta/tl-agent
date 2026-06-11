@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal
@@ -23,7 +24,7 @@ from tl_agent.phases._context import RunContext
 from tl_agent.phases._sprint import sprint_progress
 from tl_agent.storage.repos import resolved_config
 from tl_agent.tools import ToolResult
-from tl_agent.tools.jira import ListBoardsTool, ListSprintsTool
+from tl_agent.tools.jira import JiraBoard, ListBoardsTool, ListSprintsTool
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,59 @@ def _candidate_dict(s: JiraSprint, run_date: date) -> dict[str, Any]:
     }
 
 
+async def _discover_boards(run_date_iso: str) -> list[JiraBoard] | str:
+    """Live board discovery. Returns the boards, or the tool failure-kind string."""
+    outcome = await ListBoardsTool().invoke({}, run_date_iso=run_date_iso)
+    if not isinstance(outcome, ToolResult):
+        return outcome.kind.value
+    return list(outcome.value.boards)
+
+
+def _cache_board(sqlite: sqlite3.Connection, board: JiraBoard) -> str:
+    """Persist a discovered board as the learned default; return its id."""
+    resolved_config.set(sqlite, resolved_config.JIRA_BOARD_KEY, board.id)
+    return board.id
+
+
+async def resolve_board_id(
+    sqlite: sqlite3.Connection,
+    *,
+    board_id_override: str | None,
+    run_date_iso: str,
+    notes: list[str] | None = None,
+) -> str | None:
+    """Best-effort board resolution to a single id, with no human gate.
+
+    Precedence: config override → DB resolved cache → live discovery (a single
+    discovered board is cached). Returns None when nothing settles on one board
+    (discovery failed, found zero, or found several). Callers without a
+    human-decision path — Phase 1's collect, the standalone "Collect" button —
+    use this; `_resolve_board` wraps the same primitives with the multi-board
+    gate for the orchestrator pre-flight.
+    """
+    board_id = board_id_override or resolved_config.get(sqlite, resolved_config.JIRA_BOARD_KEY)
+    if board_id:
+        return board_id
+
+    discovered = await _discover_boards(run_date_iso)
+    if isinstance(discovered, str):
+        if notes is not None:
+            notes.append(f"board discovery failed ({discovered})")
+        return None
+    if len(discovered) == 1:
+        chosen = discovered[0]
+        if notes is not None:
+            notes.append(f"discovered Jira board {chosen.id!r} ({chosen.name}); cached")
+        return _cache_board(sqlite, chosen)
+    if notes is not None:
+        notes.append(
+            "no Jira boards discovered"
+            if not discovered
+            else f"{len(discovered)} Jira boards — set board_id in config/team.md to pin one"
+        )
+    return None
+
+
 async def _resolve_board(ctx: RunContext) -> str | SprintSelection:
     """Resolve the team's Jira board, returning its id or a decision to bubble up.
 
@@ -72,15 +126,15 @@ async def _resolve_board(ctx: RunContext) -> str | SprintSelection:
     if board_id:
         return board_id
 
-    outcome = await ListBoardsTool().invoke({}, run_date_iso=ctx.run_date_iso)
-    if not isinstance(outcome, ToolResult):
-        ctx.notes.append(f"sprint_select: board discovery failed ({outcome.kind.value})")
-        return SprintSelection(state="auto", reason=f"board discovery failed: {outcome.kind.value}")
+    discovered = await _discover_boards(ctx.run_date_iso)
+    if isinstance(discovered, str):
+        ctx.notes.append(f"sprint_select: board discovery failed ({discovered})")
+        return SprintSelection(state="auto", reason=f"board discovery failed: {discovered}")
 
-    boards = outcome.value.boards
+    boards = discovered
     if len(boards) == 1:
         chosen = boards[0]
-        resolved_config.set(ctx.sqlite, resolved_config.JIRA_BOARD_KEY, chosen.id)
+        _cache_board(ctx.sqlite, chosen)
         ctx.notes.append(
             f"sprint_select: discovered Jira board {chosen.id!r} ({chosen.name}); cached. "
             f"Add `- **board_id:** {chosen.id}` under Sprint scope in config/team.md to pin it."

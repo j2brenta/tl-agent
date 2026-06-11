@@ -26,6 +26,7 @@ from tl_agent.models import (
 from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
 from tl_agent.phases._sprint import sprint_progress
+from tl_agent.phases.sprint_select import resolve_board_id
 from tl_agent.tools import ToolResult
 from tl_agent.tools.chat.factory import get_chat_provider
 from tl_agent.tools.gitlab import ListCommitsTool
@@ -93,9 +94,19 @@ async def run(ctx: RunContext) -> DailySignals:
 async def _fetch_sprint(
     ctx: RunContext, since: datetime
 ) -> tuple[int, int, list[JiraTicket], list[JiraTicket]]:
+    # When no sprint was auto-selected, fall back to the board sprint_select
+    # discovered and cached — not just the config override, which may be unset.
+    board_id = ctx.team.board_id
+    if ctx.sprint_id is None:
+        board_id = await resolve_board_id(
+            ctx.sqlite,
+            board_id_override=ctx.team.board_id,
+            run_date_iso=ctx.run_date_iso,
+            notes=ctx.notes,
+        )
     tool = ListSprintTool()
     result = await tool.invoke(
-        {"sprint_id": ctx.sprint_id, "board_id": ctx.team.board_id},
+        {"sprint_id": ctx.sprint_id, "board_id": board_id},
         run_date_iso=ctx.run_date_iso,
     )
     if not isinstance(result, ToolResult):

@@ -289,11 +289,28 @@ def _collect_window(selected: str) -> tuple[datetime, datetime]:
 
 
 async def _collect_jira(selected: str) -> tuple[str | None, list[JiraTicket], str | None]:
-    """Pull the active sprint's tickets. Returns (sprint_id, tickets, error)."""
+    """Pull the active sprint's tickets. Returns (sprint_id, tickets, error).
+
+    Runs the same board resolution as the orchestrator pre-flight (config
+    override → DB cache → live discovery) so this one-shot pull discovers a
+    board instead of asking `list_sprint` to guess from an empty payload.
+    """
+    from tl_agent.phases.sprint_select import resolve_board_id
+    from tl_agent.storage import load_team
     from tl_agent.tools import ToolResult
     from tl_agent.tools.jira import ListSprintTool
 
-    outcome = await ListSprintTool().invoke({}, run_date_iso=selected)
+    conn = _conn()
+    try:
+        board_id = await resolve_board_id(
+            conn, board_id_override=load_team().board_id, run_date_iso=selected
+        )
+    finally:
+        conn.close()
+    if board_id is None:
+        return None, [], "could not resolve a Jira board — set board_id in config/team.md"
+
+    outcome = await ListSprintTool().invoke({"board_id": board_id}, run_date_iso=selected)
     if isinstance(outcome, ToolResult):
         return outcome.value.sprint_id, list(outcome.value.tickets), None
     return None, [], outcome.message
