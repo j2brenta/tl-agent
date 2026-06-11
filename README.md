@@ -122,7 +122,10 @@ check and skip provisioning.
 Leave the default unless you point `TLA_JIRA_BASE_URL` at a real Jira; in
 that case create an API token at
 https://id.atlassian.com/manage-profile/security/api-tokens and use
-`email:token` base64-encoded per Atlassian's Basic-auth convention.
+`email:token` base64-encoded per Atlassian's Basic-auth convention. For a
+self-hosted Server/Data Center instance, set `TLA_JIRA_API_VERSION=2` (it has
+no v3); Cloud keeps the default `3`. If your instance stores story points in
+a non-default custom field, set `TLA_JIRA_POINTS_FIELD`.
 
 ### `TLA_SLACK_BOT_TOKEN` + `TLA_SLACK_SIGNING_SECRET` — only if you flip the provider
 
@@ -186,8 +189,25 @@ slugs live in `config/chat_channels.yaml`.)
 The official Jira docker image is ~6 GB and takes 10–15 minutes to first-boot,
 which kills the eval-reset loop. GitLab CE boots in ~90 seconds and resets
 cleanly. So we mock the painful one (`services/jira_mock/`, FastAPI) and run
-the easy one for real. The mock speaks the REST subset we actually use; the
-shape of the calls matches the real API so swapping is one config change.
+the easy one for real. Crucially, the mock **emits real-shaped Jira JSON** —
+the `fields` envelope, ADF/plain comment bodies, `issuelinks`, paginated
+changelogs, the Agile sprint resources — not a payload pre-shaped to our
+models. So the tools exercise the same parsing they'd use against a live
+instance, and swapping `TLA_JIRA_BASE_URL` to a real Jira is one config change.
+
+### Jira v2/v3 lives in the tools, not an MCP
+
+Cloud uses REST v3 (ADF comment bodies); Server/Data Center uses v2 (plain
+text). The temptation is to wrap Jira in an MCP server to "abstract the
+version" — but MCP is a *transport/interop* boundary, not a versioning seam:
+you'd still write the v2/v3 branch inside it, and you'd lose the registry's
+writer-exclusion (Phase 5 can't bind writers), the idempotency store, tool
+spans, and readback. So the difference stays inside the `BaseTool` tools,
+where it's genuinely small: a `/rest/api/{2,3}` prefix and the comment body
+serialization (`jira_api_version` in settings). The Agile API
+(`/rest/agile/1.0`, used for sprints) is version-independent, so sprint
+discovery is unaffected by the choice. Story points — a per-instance custom
+field — are read via the configurable `jira_points_field`.
 
 ### No subprocess sandboxing for tool execution
 

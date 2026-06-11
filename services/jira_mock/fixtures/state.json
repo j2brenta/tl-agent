@@ -41,7 +41,6 @@
     }
   },
   "sprint": {
-    "added_since": "2026-05-21T09:00:00+00:00",
     "issues": [
       {
         "added_to_sprint_at": null,
@@ -265,9 +264,7 @@
         "updated_at": "2026-05-22T07:00:00+00:00"
       }
     ],
-    "sprint_day": 4,
-    "sprint_id": "S-2026-05",
-    "sprint_length_days": 10
+    "sprint_id": "S-2026-05"
   },
   "sprints": [
     {
@@ -275,8 +272,6 @@
       "end_date": "2026-05-15T09:00:00+00:00",
       "id": "S-2026-04",
       "name": "Eng Sprint 18",
-      "sprint_day": 10,
-      "sprint_length_days": 10,
       "start_date": "2026-05-05T09:00:00+00:00",
       "state": "closed"
     },
@@ -285,8 +280,6 @@
       "end_date": "2026-05-29T09:00:00+00:00",
       "id": "S-2026-05",
       "name": "Eng Sprint 19",
-      "sprint_day": 4,
-      "sprint_length_days": 10,
       "start_date": "2026-05-19T09:00:00+00:00",
       "state": "active"
     },
@@ -295,8 +288,6 @@
       "end_date": "2026-06-09T09:00:00+00:00",
       "id": "S-2026-06",
       "name": "Eng Sprint 20",
-      "sprint_day": null,
-      "sprint_length_days": 10,
       "start_date": "2026-05-30T09:00:00+00:00",
       "state": "future"
     }

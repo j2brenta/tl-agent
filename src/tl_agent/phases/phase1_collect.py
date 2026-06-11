@@ -25,6 +25,7 @@ from tl_agent.models import (
 )
 from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
+from tl_agent.phases._sprint import sprint_progress
 from tl_agent.tools import ToolResult
 from tl_agent.tools.chat.factory import get_chat_provider
 from tl_agent.tools.gitlab import ListCommitsTool
@@ -44,7 +45,7 @@ async def run(ctx: RunContext) -> DailySignals:
     until = datetime.combine(today + timedelta(days=1), time(0, 0), tzinfo=UTC)
     since = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
 
-    sprint_task = _fetch_sprint(ctx)
+    sprint_task = _fetch_sprint(ctx, since)
     commits_task = _fetch_commits(ctx, since, until)
     standups_today_task = fetch_standups(ctx, since=since, until=until)
     standups_yesterday_task = fetch_standups(ctx, since=since - timedelta(days=1), until=since)
@@ -90,18 +91,38 @@ async def run(ctx: RunContext) -> DailySignals:
 
 
 async def _fetch_sprint(
-    ctx: RunContext,
+    ctx: RunContext, since: datetime
 ) -> tuple[int, int, list[JiraTicket], list[JiraTicket]]:
     tool = ListSprintTool()
-    result = await tool.invoke({"sprint_id": ctx.sprint_id}, run_date_iso=ctx.run_date_iso)
+    result = await tool.invoke(
+        {"sprint_id": ctx.sprint_id, "board_id": ctx.team.board_id},
+        run_date_iso=ctx.run_date_iso,
+    )
     if not isinstance(result, ToolResult):
         ctx.notes.append(f"phase1: jira sprint fetch failed ({result.kind.value})")
         return 1, 10, [], []
     out = result.value
-    added: list[JiraTicket] = []
-    if out.added_since:
-        added = [t for t in out.tickets if t.created_at >= out.added_since]
-    return out.sprint_day, out.sprint_length_days, list(out.tickets), added
+    sprint_day, sprint_length = sprint_progress(out.start_date, out.end_date, ctx.run_date)
+    tickets = [_resolve_people(t, ctx) for t in out.tickets]
+    # A ticket "added since yesterday" is one created within the collection
+    # window (Jira has no per-issue "added to sprint" timestamp on this API).
+    added = [t for t in tickets if t.created_at >= since]
+    return sprint_day, sprint_length, tickets, added
+
+
+def _resolve_people(ticket: JiraTicket, ctx: RunContext) -> JiraTicket:
+    """Fold a ticket's raw Jira assignee/reporter onto the team roster.
+
+    The Jira API reports a `displayName`/`accountId`; we replace it with the
+    matching member `id` so downstream phases can compare on a single stable
+    identifier. Unresolvable handles (someone off-team) are left untouched and
+    surface as an identity-mapping gap in the Workflow tab.
+    """
+    assignee = ctx.team.resolve(ticket.assignee) or ticket.assignee
+    reporter = ctx.team.resolve(ticket.reporter) or ticket.reporter
+    if assignee == ticket.assignee and reporter == ticket.reporter:
+        return ticket
+    return ticket.model_copy(update={"assignee": assignee, "reporter": reporter})
 
 
 async def _fetch_commits(ctx: RunContext, since: datetime, until: datetime) -> list[GitCommit]:

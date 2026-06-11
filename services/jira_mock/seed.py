@@ -87,11 +87,10 @@ def build_state() -> dict[str, object]:
     links["ENG-12"] = {"blocks": ["ENG-19"], "blocked_by": ["ENG-9"]}
     links["ENG-19"] = {"blocks": [], "blocked_by": ["ENG-12"]}
 
+    # The active sprint's ticket list. Sprint day/length are derived downstream
+    # from the board metadata's start/end dates, not stored here.
     sprint = {
         "sprint_id": SPRINT_ID,
-        "sprint_day": 4,
-        "sprint_length_days": 10,
-        "added_since": (RUN_DATE - timedelta(days=1)).isoformat(),
         "issues": list(tickets.values()),
     }
 
@@ -106,8 +105,6 @@ def build_state() -> dict[str, object]:
             "board_id": BOARD_ID,
             "start_date": (SPRINT_START - timedelta(days=14)).isoformat(),
             "end_date": (SPRINT_START - timedelta(days=4)).isoformat(),
-            "sprint_day": 10,
-            "sprint_length_days": 10,
         },
         {
             "id": SPRINT_ID,
@@ -116,8 +113,6 @@ def build_state() -> dict[str, object]:
             "board_id": BOARD_ID,
             "start_date": SPRINT_START.isoformat(),
             "end_date": (SPRINT_START + timedelta(days=10)).isoformat(),
-            "sprint_day": 4,
-            "sprint_length_days": 10,
         },
         {
             "id": "S-2026-06",
@@ -126,8 +121,6 @@ def build_state() -> dict[str, object]:
             "board_id": BOARD_ID,
             "start_date": (SPRINT_START + timedelta(days=11)).isoformat(),
             "end_date": (SPRINT_START + timedelta(days=21)).isoformat(),
-            "sprint_day": None,
-            "sprint_length_days": 10,
         },
     ]
 

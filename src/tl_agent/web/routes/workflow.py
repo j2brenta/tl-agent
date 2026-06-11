@@ -319,15 +319,10 @@ def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
 
     team = load_team()
 
-    def resolve(handle: str | None) -> str | None:
-        if not handle:
-            return None
-        return next((e.id for e in team.engineers if e.matches(handle)), None)
-
     rows: list[dict[str, Any]] = []
     for t in sorted(tickets, key=lambda x: x.key):
         assignee = (t.assignee or "").strip() or None
-        resolved = resolve(assignee)
+        resolved = team.resolve(assignee)
         rows.append(
             {
                 "ticket": t,

@@ -57,6 +57,19 @@ class TeamConfig:
     def by_id(self, member_id: str) -> Engineer | None:
         return next((m for m in self.members if m.id == member_id), None)
 
+    def resolve(self, handle: str | None) -> str | None:
+        """Map a cross-system handle to a member `id`, or None if unknown.
+
+        `handle` is whatever an upstream system reports — a Jira `displayName`
+        or `accountId`, a GitLab username, a chat id. Resolution goes through
+        `Engineer.matches()`, so it honours `jira_account_id`, `display_name`,
+        `aliases`, and the bare `id`. Used to fold a ticket's raw assignee back
+        onto the team roster (see `phases.phase1_collect`).
+        """
+        if not handle:
+            return None
+        return next((m.id for m in self.members if m.matches(handle)), None)
+
 
 def _parse_bullets(block: str) -> dict[str, str | tuple[str, ...]]:
     """Pull `- **key:** value` bullets from an `## H2` body into a dict."""

@@ -7,6 +7,12 @@ section is parsed by `storage.markdown_loader.load_team()` into
 `engineer` when omitted. Per-system logins (`jira_account_id`,
 `gitlab_username`, `chat_user_id`) capture handles that differ across systems.
 
+A Jira ticket's assignee arrives as a `displayName` or an `accountId` (Cloud)
+/ username (Server). Phase 1 folds it back onto this roster via
+`TeamConfig.resolve()`, which matches on `display_name`, `jira_account_id`,
+and `aliases` — so set `jira_account_id` to the Jira account id (Cloud) or
+username (Server), and either that or the display name will resolve.
+
 ---
 
 ## Sprint scope

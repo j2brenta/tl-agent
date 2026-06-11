@@ -279,6 +279,20 @@ def test_load_team_parses_sprint_scope() -> None:
     assert all(m.id != "sprint_scope" for m in team.members)
 
 
+def test_team_resolve_matches_jira_account_id_and_display_name() -> None:
+    team = load_team()
+    # A Jira display name folds onto the member id…
+    assert team.resolve("John Doe") == "john"
+    # …as does the bare jira_account_id / username…
+    assert team.resolve("matt") == "matt"
+    # …and an alias (Dana's Jira handle differs from her id).
+    assert team.resolve("dpark") == "dana"
+    # Case-insensitive; unknown handles and None don't resolve.
+    assert team.resolve("ALICIA PARK") == "alicia"
+    assert team.resolve("someone-else") is None
+    assert team.resolve(None) is None
+
+
 def test_load_team_separates_leadership_from_engineers() -> None:
     team = load_team()
     # Leadership is excluded from the engineers loop the workflow iterates.

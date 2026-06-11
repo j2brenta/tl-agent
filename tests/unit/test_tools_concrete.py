@@ -6,6 +6,8 @@ End-to-end against the compose stack lives in tests/integration/.
 
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 from datetime import UTC, date, datetime
 
@@ -68,28 +70,89 @@ def test_register_all_tools_no_collisions() -> None:
 # -------------------- jira --------------------
 
 
-async def test_get_ticket_happy_path(httpx_mock: HTTPXMock) -> None:
-    payload = {
-        "key": "ENG-12",
+_BLOCKS_LINK = {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"}
+
+
+def _issue(key: str, **fields: object) -> dict[str, object]:
+    """Build a real-shaped Jira issue envelope with sensible defaults."""
+    base: dict[str, object] = {
         "summary": "add retry",
-        "status": "in_progress",
-        "assignee": "john",
-        "created_at": "2026-05-20T09:00:00+00:00",
-        "updated_at": "2026-05-22T09:00:00+00:00",
-        "blocks": [],
-        "blocked_by": [],
+        "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+        "assignee": {"displayName": "john"},
+        "reporter": {"displayName": "tl"},
+        "created": "2026-05-20T09:00:00+00:00",
+        "updated": "2026-05-22T09:00:00+00:00",
+        "labels": [],
+        "customfield_10016": 5,
+        "issuelinks": [],
     }
-    httpx_mock.add_response(url="http://localhost:9100/rest/api/3/issue/ENG-12", json=payload)
+    base.update(fields)
+    return {"key": key, "fields": base}
+
+
+async def test_get_ticket_happy_path(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url=re.compile(r"http://localhost:9100/rest/api/3/issue/ENG-12"),
+        json=_issue(
+            "ENG-12",
+            labels=["billing"],
+            issuelinks=[
+                {"type": _BLOCKS_LINK, "outwardIssue": {"key": "ENG-19"}},
+                {"type": _BLOCKS_LINK, "inwardIssue": {"key": "ENG-9"}},
+            ],
+        ),
+    )
     tool = GetTicketTool()
     result = await tool.invoke({"key": "ENG-12"}, run_date_iso="2026-05-22")
     assert isinstance(result, ToolResult)
+    t = result.value.ticket
+    assert t.key == "ENG-12"
+    assert t.assignee == "john"
+    assert t.status.value == "in_progress"
+    assert t.points == 5.0
+    assert t.blocks == ("ENG-19",)
+    assert t.blocked_by == ("ENG-9",)
+
+
+async def test_get_ticket_assignee_falls_back_to_account_id(httpx_mock: HTTPXMock) -> None:
+    # Cloud privacy can hide displayName/name → accountId is the only identity.
+    httpx_mock.add_response(
+        url=re.compile(r".*/issue/ENG-12"),
+        json=_issue("ENG-12", assignee={"accountId": "5b10ac8d82e05b22cc7d4ef5"}),
+    )
+    result = await GetTicketTool().invoke({"key": "ENG-12"}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
+    assert result.value.ticket.assignee == "5b10ac8d82e05b22cc7d4ef5"
+
+
+async def test_get_ticket_uses_v2_prefix(
+    httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TLA_JIRA_API_VERSION", "2")
+    httpx_mock.add_response(
+        url=re.compile(r"http://localhost:9100/rest/api/2/issue/ENG-12"),
+        json=_issue("ENG-12"),
+    )
+    result = await GetTicketTool().invoke({"key": "ENG-12"}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
     assert result.value.ticket.key == "ENG-12"
-    assert result.value.ticket.assignee == "john"
+    assert httpx_mock.get_requests()[0].url.path == "/rest/api/2/issue/ENG-12"
+
+
+async def test_get_ticket_status_falls_back_to_category(httpx_mock: HTTPXMock) -> None:
+    # A status name the map doesn't know → bucket via statusCategory.
+    httpx_mock.add_response(
+        url=re.compile(r".*/issue/ENG-12"),
+        json=_issue("ENG-12", status={"name": "Awaiting QA", "statusCategory": {"key": "done"}}),
+    )
+    result = await GetTicketTool().invoke({"key": "ENG-12"}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
+    assert result.value.ticket.status.value == "done"
 
 
 async def test_get_ticket_404_returns_typed_error(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9100/rest/api/3/issue/MISSING-1",
+        url=re.compile(r".*/issue/MISSING-1"),
         status_code=404,
         json={"error": "not found"},
     )
@@ -100,29 +163,48 @@ async def test_get_ticket_404_returns_typed_error(httpx_mock: HTTPXMock) -> None
 
 
 async def test_get_ticket_history(httpx_mock: HTTPXMock) -> None:
+    # Real changelog: status change is one item among others — only it counts.
     httpx_mock.add_response(
-        url="http://localhost:9100/rest/api/3/issue/ENG-12/changelog",
+        url=re.compile(r".*/issue/ENG-12/changelog"),
         json={
             "values": [
                 {
-                    "at": "2026-05-20T10:00:00+00:00",
-                    "by": "john",
-                    "from_status": "todo",
-                    "to_status": "in_progress",
+                    "created": "2026-05-20T10:00:00+00:00",
+                    "author": {"displayName": "john"},
+                    "items": [
+                        {"field": "assignee", "fromString": "x", "toString": "y"},
+                        {"field": "status", "fromString": "To Do", "toString": "In Progress"},
+                    ],
                 }
-            ]
+            ],
+            "isLast": True,
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 50,
         },
     )
     result = await GetHistoryTool().invoke({"key": "ENG-12"}, run_date_iso="2026-05-22")
     assert isinstance(result, ToolResult)
     assert len(result.value.status_changes) == 1
+    assert result.value.status_changes[0].from_status.value == "todo"
     assert result.value.status_changes[0].to_status.value == "in_progress"
 
 
-async def test_get_dependencies(httpx_mock: HTTPXMock) -> None:
+async def test_get_dependencies_from_issuelinks(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9100/rest/api/3/issue/ENG-12/links",
-        json={"blocks": ["ENG-19"], "blocked_by": ["ENG-9"]},
+        url=re.compile(r".*/issue/ENG-12"),
+        json=_issue(
+            "ENG-12",
+            issuelinks=[
+                {"type": _BLOCKS_LINK, "outwardIssue": {"key": "ENG-19"}},
+                {"type": _BLOCKS_LINK, "inwardIssue": {"key": "ENG-9"}},
+                # A non-blocking link must be ignored.
+                {
+                    "type": {"name": "Relates", "outward": "relates to"},
+                    "outwardIssue": {"key": "ENG-3"},
+                },
+            ],
+        ),
     )
     result = await GetDependenciesTool().invoke({"key": "ENG-12"}, run_date_iso="2026-05-22")
     assert isinstance(result, ToolResult)
@@ -130,38 +212,75 @@ async def test_get_dependencies(httpx_mock: HTTPXMock) -> None:
     assert result.value.blocked_by == ["ENG-9"]
 
 
-async def test_list_sprint(httpx_mock: HTTPXMock) -> None:
+async def test_list_sprint_by_id(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9100/rest/agile/1.0/sprint/active/issue",
+        url=re.compile(r".*/rest/agile/1.0/sprint/S-2026-05$"),
         json={
-            "sprint_id": "S-2026-05",
-            "sprint_day": 4,
-            "sprint_length_days": 10,
-            "added_since": "2026-05-21T12:00:00+00:00",
-            "issues": [],
+            "id": "S-2026-05",
+            "name": "Eng Sprint 19",
+            "state": "active",
+            "startDate": "2026-05-19T09:00:00+00:00",
+            "endDate": "2026-05-29T09:00:00+00:00",
         },
     )
-    result = await ListSprintTool().invoke({}, run_date_iso="2026-05-22")
+    httpx_mock.add_response(
+        url=re.compile(r".*/rest/agile/1.0/sprint/S-2026-05/issue"),
+        json={
+            "issues": [_issue("ENG-1", summary="rate limiter")],
+            "isLast": True,
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 50,
+        },
+    )
+    result = await ListSprintTool().invoke({"sprint_id": "S-2026-05"}, run_date_iso="2026-05-22")
     assert isinstance(result, ToolResult)
     assert result.value.sprint_id == "S-2026-05"
-    assert result.value.sprint_day == 4
+    assert result.value.start_date is not None
+    assert [t.key for t in result.value.tickets] == ["ENG-1"]
 
 
-async def test_list_sprints(httpx_mock: HTTPXMock) -> None:
+async def test_list_sprint_by_board_discovers_active(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9100/rest/agile/1.0/board/ENG/sprint",
+        url=re.compile(r".*/board/ENG/sprint"),
         json={
             "values": [
-                {"id": "S-2026-04", "name": "Eng Sprint 18", "state": "closed", "board_id": "ENG"},
                 {
                     "id": "S-2026-05",
                     "name": "Eng Sprint 19",
                     "state": "active",
-                    "board_id": "ENG",
-                    "sprint_day": 4,
-                    "sprint_length_days": 10,
+                    "startDate": "2026-05-19T09:00:00+00:00",
+                    "endDate": "2026-05-29T09:00:00+00:00",
+                }
+            ],
+            "isLast": True,
+        },
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*/sprint/S-2026-05/issue"),
+        json={"issues": [], "isLast": True, "total": 0},
+    )
+    result = await ListSprintTool().invoke({"board_id": "ENG"}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
+    assert result.value.sprint_id == "S-2026-05"
+
+
+async def test_list_sprints(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url=re.compile(r".*/board/ENG/sprint"),
+        json={
+            "values": [
+                {"id": "S-2026-04", "name": "Eng Sprint 18", "state": "closed"},
+                {
+                    "id": "S-2026-05",
+                    "name": "Eng Sprint 19",
+                    "state": "active",
+                    "originBoardId": "ENG",
+                    "startDate": "2026-05-19T09:00:00+00:00",
+                    "endDate": "2026-05-29T09:00:00+00:00",
                 },
-            ]
+            ],
+            "isLast": True,
         },
     )
     result = await ListSprintsTool().invoke({"board_id": "ENG"}, run_date_iso="2026-05-22")
@@ -169,24 +288,41 @@ async def test_list_sprints(httpx_mock: HTTPXMock) -> None:
     assert [s.id for s in result.value.sprints] == ["S-2026-04", "S-2026-05"]
     active = [s for s in result.value.sprints if s.state.value == "active"]
     assert active[0].name == "Eng Sprint 19"
-    assert active[0].sprint_day == 4
+    assert active[0].start_date is not None
 
 
-async def test_post_jira_comment_writes_with_idempotency(httpx_mock: HTTPXMock) -> None:
+async def test_post_jira_comment_v3_posts_adf(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9100/rest/api/3/issue/ENG-12/comment",
+        url=re.compile(r"http://localhost:9100/rest/api/3/issue/ENG-12/comment"),
         method="POST",
-        json={
-            "key": "ENG-12",
-            "comment_id": "C-1",
-            "posted_at": "2026-05-22T10:00:00+00:00",
-        },
+        json={"id": "C-1", "created": "2026-05-22T10:00:00+00:00", "author": {"displayName": "tl"}},
     )
-    tool = PostCommentTool()
-    # No idempotency store ⇒ goes through; just smoke that the writer works.
-    result = await tool.invoke({"key": "ENG-12", "body": "hi"}, run_date_iso="2026-05-22")
+    result = await PostCommentTool().invoke(
+        {"key": "ENG-12", "body": "hi"}, run_date_iso="2026-05-22"
+    )
     assert isinstance(result, ToolResult)
     assert result.value.comment_id == "C-1"
+    sent = json.loads(httpx_mock.get_requests()[-1].content)
+    assert sent["body"]["type"] == "doc"
+    assert sent["body"]["content"][0]["content"][0]["text"] == "hi"
+
+
+async def test_post_jira_comment_v2_posts_plain(
+    httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TLA_JIRA_API_VERSION", "2")
+    httpx_mock.add_response(
+        url=re.compile(r"http://localhost:9100/rest/api/2/issue/ENG-12/comment"),
+        method="POST",
+        json={"id": "C-2", "created": "2026-05-22T10:00:00+00:00"},
+    )
+    result = await PostCommentTool().invoke(
+        {"key": "ENG-12", "body": "hi"}, run_date_iso="2026-05-22"
+    )
+    assert isinstance(result, ToolResult)
+    assert result.value.comment_id == "C-2"
+    sent = json.loads(httpx_mock.get_requests()[-1].content)
+    assert sent["body"] == "hi"
 
 
 # -------------------- gitlab --------------------

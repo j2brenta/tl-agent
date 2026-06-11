@@ -14,11 +14,13 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Literal
 
 from tl_agent.models import JiraSprint, JiraSprintState
 from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
+from tl_agent.phases._sprint import sprint_progress
 from tl_agent.tools import ToolResult
 from tl_agent.tools.jira import ListSprintsTool
 
@@ -42,13 +44,14 @@ class SprintSelection:
     candidates: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
 
-def _candidate_dict(s: JiraSprint) -> dict[str, Any]:
+def _candidate_dict(s: JiraSprint, run_date: date) -> dict[str, Any]:
+    day, length = sprint_progress(s.start_date, s.end_date, run_date)
     return {
         "id": s.id,
         "name": s.name,
         "state": s.state.value,
-        "sprint_day": s.sprint_day,
-        "sprint_length_days": s.sprint_length_days,
+        "sprint_day": day if s.state is JiraSprintState.ACTIVE else None,
+        "sprint_length_days": length,
     }
 
 
@@ -58,8 +61,8 @@ async def run(ctx: RunContext) -> SprintSelection:
     board_id = ctx.team.board_id
     pattern = ctx.team.sprint_name_pattern
     if not board_id or not pattern:
-        # No board/pattern configured — keep the legacy behaviour (Phase 1
-        # falls back to Jira's active-sprint endpoint).
+        # No board/pattern configured — without a board there's no sprint to
+        # discover, so Phase 1 will collect an empty sprint and note it.
         ctx.notes.append("sprint_select: board_id/sprint_name_pattern not configured; using active")
         return SprintSelection(state="auto", reason="no board/pattern configured")
 
@@ -99,7 +102,7 @@ async def run(ctx: RunContext) -> SprintSelection:
             state="auto",
             reason=f"single active in-scope sprint: {chosen.name}",
             chosen_sprint_id=chosen.id,
-            candidates=[_candidate_dict(chosen)],
+            candidates=[_candidate_dict(chosen, ctx.run_date)],
         )
 
     # Zero or several active matches — a human picks. Offer the in-scope set
@@ -114,5 +117,5 @@ async def run(ctx: RunContext) -> SprintSelection:
     return SprintSelection(
         state="pending",
         reason=reason,
-        candidates=[_candidate_dict(s) for s in picker],
+        candidates=[_candidate_dict(s, ctx.run_date) for s in picker],
     )

@@ -7,6 +7,8 @@ it with a lightweight context stand-in and stub the board HTTP via pytest-httpx.
 
 from __future__ import annotations
 
+import re
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,7 +20,7 @@ from tl_agent.storage import TeamConfig
 from tl_agent.tools import registry
 from tl_agent.tools.jira import register_jira_tools
 
-_BOARD_URL = "http://localhost:9100/rest/agile/1.0/board/ENG/sprint"
+_BOARD_URL = re.compile(r"http://localhost:9100/rest/agile/1.0/board/ENG/sprint")
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +31,9 @@ def _reset_registry() -> None:
 
 def _ctx(board_id: str | None = "ENG", pattern: str | None = "Eng Sprint .*") -> Any:
     team = TeamConfig(members=(), board_id=board_id, sprint_name_pattern=pattern)
-    return SimpleNamespace(team=team, run_date_iso="2026-05-22", notes=[])
+    return SimpleNamespace(
+        team=team, run_date=date(2026, 5, 22), run_date_iso="2026-05-22", notes=[]
+    )
 
 
 def _sprint(sid: str, name: str, state: str, **extra: Any) -> dict[str, Any]:

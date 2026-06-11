@@ -84,6 +84,32 @@ class Settings(BaseSettings):
     # jira / gitlab
     jira_base_url: str = Field(default="http://localhost:9100")
     jira_token: str = Field(default="dev-token")
+    # "3" = Jira Cloud (ADF comment bodies); "2" = Server/Data Center (plain
+    # text). Only the core REST prefix + comment serialization differ; the
+    # Agile API (/rest/agile/1.0) is version-independent.
+    jira_api_version: Literal["2", "3"] = "3"
+    # Story points have no fixed field in Jira — each instance exposes them via
+    # a custom field whose id varies. Override per instance.
+    jira_points_field: str = "customfield_10016"
+    # Optional custom field holding the issue's sprint (also instance-specific).
+    jira_sprint_field: str | None = None
+    # Maps a Jira status *name* (lower-cased) to one of our coarse buckets.
+    # Falls back to status.statusCategory when a name isn't listed.
+    jira_status_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "to do": "todo",
+            "open": "todo",
+            "backlog": "todo",
+            "in progress": "in_progress",
+            "in review": "in_review",
+            "code review": "in_review",
+            "review": "in_review",
+            "blocked": "blocked",
+            "done": "done",
+            "closed": "done",
+            "resolved": "done",
+        }
+    )
     gitlab_base_url: str = Field(default="http://localhost:8929")
     gitlab_token: str = Field(default="dev-token")
     # Seed-time admin token (Personal Access Token with `api` scope). Used
