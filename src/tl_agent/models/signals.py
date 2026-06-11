@@ -47,6 +47,34 @@ class JiraEstimateChange(BaseModel):
     to_points: float | None
 
 
+class JiraSprintState(StrEnum):
+    """Lifecycle state of a sprint as Jira reports it."""
+
+    ACTIVE = "active"
+    CLOSED = "closed"
+    FUTURE = "future"
+
+
+class JiraSprint(BaseModel):
+    """A sprint as the board lists it — metadata only, no tickets.
+
+    `sprint_select` reasons over a list of these to decide which sprint the
+    team is currently working over (the single `active` one whose name matches
+    the team's configured pattern).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    state: JiraSprintState
+    board_id: str | None = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    sprint_day: int | None = Field(default=None, ge=1)
+    sprint_length_days: int | None = Field(default=None, ge=1)
+
+
 class JiraTicket(BaseModel):
     """A sprint ticket as the agent sees it."""
 

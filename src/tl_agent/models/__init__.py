@@ -13,7 +13,7 @@ from tl_agent.models.decision import (
     ResponseDraft,
     ResponseMode,
 )
-from tl_agent.models.engineer import Engineer
+from tl_agent.models.engineer import Engineer, Role
 from tl_agent.models.flag import Flag, FlagType
 from tl_agent.models.hotspot import Hotspot
 from tl_agent.models.prediction import Prediction, PredictionOutcome
@@ -21,6 +21,8 @@ from tl_agent.models.signals import (
     DailySignals,
     GitCommit,
     JiraEstimateChange,
+    JiraSprint,
+    JiraSprintState,
     JiraStatus,
     JiraStatusChange,
     JiraTicket,
@@ -51,6 +53,8 @@ __all__ = [
     "GitCommit",
     "Hotspot",
     "JiraEstimateChange",
+    "JiraSprint",
+    "JiraSprintState",
     "JiraStatus",
     "JiraStatusChange",
     "JiraTicket",
@@ -59,6 +63,7 @@ __all__ = [
     "PredictionOutcome",
     "ResponseDraft",
     "ResponseMode",
+    "Role",
     "StandupExtract",
     "StandupMessage",
     "TriageStatus",

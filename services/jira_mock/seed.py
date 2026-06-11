@@ -20,6 +20,10 @@ from pathlib import Path
 RUN_DATE = datetime(2026, 5, 22, 9, 0, tzinfo=UTC)
 SPRINT_START = datetime(2026, 5, 19, 9, 0, tzinfo=UTC)
 
+BOARD_ID = "ENG"
+SPRINT_ID = "S-2026-05"
+SPRINT_NAME = "Eng Sprint 19"
+
 ENGINEERS = ["john", "matt", "alicia", "karen"]
 TICKETS = [
     # John — billing
@@ -57,7 +61,7 @@ def build_state() -> dict[str, object]:
             "assignee": assignee,
             "reporter": "tl",
             "points": float(points),
-            "sprint": "S-2026-05",
+            "sprint": SPRINT_ID,
             "created_at": created.isoformat(),
             "updated_at": updated.isoformat(),
             "added_to_sprint_at": None,
@@ -84,14 +88,57 @@ def build_state() -> dict[str, object]:
     links["ENG-19"] = {"blocks": [], "blocked_by": ["ENG-12"]}
 
     sprint = {
-        "sprint_id": "S-2026-05",
+        "sprint_id": SPRINT_ID,
         "sprint_day": 4,
         "sprint_length_days": 10,
         "added_since": (RUN_DATE - timedelta(days=1)).isoformat(),
         "issues": list(tickets.values()),
     }
 
-    return {"tickets": tickets, "history": history, "links": links, "sprint": sprint}
+    # Board-level sprint list (metadata only). Exactly one `active` sprint whose
+    # name matches the team pattern, so discovery auto-resolves on the default
+    # seed. The closed/future entries exercise the filter without ambiguity.
+    sprints = [
+        {
+            "id": "S-2026-04",
+            "name": "Eng Sprint 18",
+            "state": "closed",
+            "board_id": BOARD_ID,
+            "start_date": (SPRINT_START - timedelta(days=14)).isoformat(),
+            "end_date": (SPRINT_START - timedelta(days=4)).isoformat(),
+            "sprint_day": 10,
+            "sprint_length_days": 10,
+        },
+        {
+            "id": SPRINT_ID,
+            "name": SPRINT_NAME,
+            "state": "active",
+            "board_id": BOARD_ID,
+            "start_date": SPRINT_START.isoformat(),
+            "end_date": (SPRINT_START + timedelta(days=10)).isoformat(),
+            "sprint_day": 4,
+            "sprint_length_days": 10,
+        },
+        {
+            "id": "S-2026-06",
+            "name": "Eng Sprint 20",
+            "state": "future",
+            "board_id": BOARD_ID,
+            "start_date": (SPRINT_START + timedelta(days=11)).isoformat(),
+            "end_date": (SPRINT_START + timedelta(days=21)).isoformat(),
+            "sprint_day": None,
+            "sprint_length_days": 10,
+        },
+    ]
+
+    return {
+        "tickets": tickets,
+        "history": history,
+        "links": links,
+        "sprint": sprint,
+        "board_id": BOARD_ID,
+        "sprints": sprints,
+    }
 
 
 def main() -> None:

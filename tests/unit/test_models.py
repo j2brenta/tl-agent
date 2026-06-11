@@ -30,6 +30,7 @@ from tl_agent.models import (
     PredictionOutcome,
     ResponseDraft,
     ResponseMode,
+    Role,
     StandupMessage,
     TriageStatus,
 )
@@ -50,6 +51,21 @@ def test_engineer_matches_aliases() -> None:
     assert eng.matches("JDoe")
     assert eng.matches("johnny")
     assert not eng.matches("alicia")
+
+
+def test_engineer_role_kind_defaults_to_engineer() -> None:
+    eng = Engineer(id="john", display_name="John Doe")
+    assert eng.role_kind is Role.ENGINEER
+
+
+def test_engineer_accepts_explicit_role_kind() -> None:
+    pm = Engineer(id="dana", display_name="Dana Park", role_kind=Role.PRODUCT_MANAGER)
+    assert pm.role_kind is Role.PRODUCT_MANAGER
+    # Parses from the raw string the markdown loader produces.
+    tl = Engineer.model_validate(
+        {"id": "kirill", "display_name": "Kirill", "role_kind": "team_lead"}
+    )
+    assert tl.role_kind is Role.TEAM_LEAD
 
 
 def test_triage_attention_worthy() -> None:

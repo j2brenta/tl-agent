@@ -1,0 +1,82 @@
+{% extends "_base.html" %}
+{% block title %}Team{% endblock %}
+{% block nav_team %}active{% endblock %}
+
+{% macro system_cell(cell) -%}
+  {% if cell.diverges and not cell.alias_safe %}
+    <span class="badge badge-amber" title="Differs from id — work matched by id may be missed">⚠ {{ cell.handle }}</span>
+  {% elif cell.diverges %}
+    <span class="badge badge-blue" title="Differs from id, but resolved via alias">{{ cell.handle }}</span>
+  {% elif cell.explicit %}
+    <code>{{ cell.handle }}</code>
+  {% else %}
+    <span style="color:var(--text-faint)" title="No explicit handle — falls back to id">{{ cell.handle }}</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro roster_table(rows) -%}
+<table>
+  <thead>
+    <tr>
+      <th>Member</th>
+      <th>Title</th>
+      <th>Jira</th>
+      <th>GitLab</th>
+      <th>Chat</th>
+      <th>Aliases</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>
+        <strong>{{ row.member.display_name }}</strong>
+        <span style="color:var(--text-faint)">· {{ row.member.id }}</span>
+        {% if row.at_risk %}<span class="badge badge-amber" title="A Jira/GitLab handle differs from id">⚠ identity</span>{% endif %}
+      </td>
+      <td style="color:var(--text-muted)">{{ row.member.role }}</td>
+      <td>{{ system_cell(row.jira) }}</td>
+      <td>{{ system_cell(row.gitlab) }}</td>
+      <td>{{ system_cell(row.chat) }}</td>
+      <td style="color:var(--text-muted)">
+        {%- if row.aliases -%}
+          {% for a in row.aliases %}<code>{{ a }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+        {%- else -%}
+          <span style="color:var(--text-faint)">—</span>
+        {%- endif -%}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{%- endmacro %}
+
+{% block body %}
+
+<div class="page-header">
+  <h1>Team <span class="sprint-name">roster &amp; identity mapping</span></h1>
+</div>
+
+<div class="banner banner-warn">
+  <span>⚠</span>
+  <span>
+    A <strong>⚠</strong> on Jira or GitLab means the handle differs from the
+    member's <code>id</code>. Triage matches tickets and commits by
+    <code>id</code>, so their work can go unmatched. Chat resolves via aliases,
+    so divergence there is safe. Edit <code>config/team.md</code> to change any handle.
+  </span>
+</div>
+
+{% if leadership %}
+<div class="card">
+  <div class="section-label">Leadership</div>
+  {{ roster_table(leadership) }}
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="section-label">Engineers</div>
+  {{ roster_table(engineers) }}
+</div>
+
+{% endblock %}

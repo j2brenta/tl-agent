@@ -1,0 +1,78 @@
+{# HTMX fragment: workflow milestones for a date. Self-polls while a run is live. #}
+<div id="workflow-content"
+     {% if polling %}hx-get="/workflow/fragment?date={{ selected_date }}" hx-trigger="load delay:2s" hx-swap="outerHTML"{% endif %}>
+{% if not runs %}
+  <div class="card">
+    <div style="font-size:13px;color:var(--text-muted)">
+      No runs for {{ selected_date }} yet. Click <strong>Run now</strong> to start the
+      morning loop, or run <code>tl-agent run --date {{ selected_date }}</code>.
+    </div>
+  </div>
+{% else %}
+  {% for run in runs %}
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">{{ run.id }}</span>
+      <span style="font-size:11px;color:var(--text-muted)">started {{ run.started_at[:19].replace('T',' ') }} UTC</span>
+      {% if run.status == 'completed' %}
+        <span class="badge badge-green" style="font-size:10px">completed</span>
+      {% elif run.status == 'in_progress' %}
+        <span class="badge badge-blue" style="font-size:10px">running…</span>
+      {% elif run.status == 'awaiting_sprint' %}
+        <span class="badge badge-amber" style="font-size:10px">awaiting sprint decision</span>
+      {% elif run.status == 'resolved' %}
+        <span class="badge badge-gray" style="font-size:10px">resolved</span>
+      {% else %}
+        <span class="badge badge-amber" style="font-size:10px">{{ run.status }}</span>
+      {% endif %}
+    </div>
+
+    {# Human gate: pick a sprint when discovery was ambiguous. #}
+    {% if run.status == 'awaiting_sprint' and run.sprint_decision.state == 'pending' %}
+    <div class="banner banner-warn" style="margin-bottom:14px">
+      <span>⚠</span>
+      <span>Sprint discovery needs a human: {{ run.sprint_decision.reason }}.</span>
+    </div>
+    <form hx-post="/workflow/sprint/resolve" hx-target="#workflow-content" hx-swap="outerHTML"
+          style="margin-bottom:6px">
+      <input type="hidden" name="run_id" value="{{ run.id }}">
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+        {% for c in run.sprint_decision.candidates %}
+        <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer">
+          <input type="radio" name="sprint_id" value="{{ c.id }}" {% if loop.first %}checked{% endif %}>
+          <span style="font-family:var(--mono)">{{ c.id }}</span>
+          <span>{{ c.name }}</span>
+          <span class="badge badge-{% if c.state == 'active' %}green{% elif c.state == 'future' %}blue{% else %}gray{% endif %}" style="font-size:10px">{{ c.state }}</span>
+          {% if c.sprint_day %}<span style="font-size:11px;color:var(--text-faint)">day {{ c.sprint_day }}/{{ c.sprint_length_days }}</span>{% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn-import">Confirm selection</button>
+    </form>
+    {% endif %}
+
+    {# Milestones #}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      {% for m in run.milestones %}
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="width:18px;text-align:center;font-size:12px;color:var(--text-muted)">{{ m.icon }}</span>
+        <span style="width:170px;font-size:13px;font-weight:500;color:var(--text)">{{ m.label }}</span>
+        <span style="flex:1;font-size:12px;color:var(--text-muted)">{{ m.detail }}</span>
+        <span style="width:90px;text-align:right;font-size:11px">
+          {% if m.status == 'done' %}
+            <span style="color:var(--green)">● done</span>
+          {% elif m.status == 'running' %}
+            <span style="color:var(--blue)">◐ running</span>
+          {% elif m.status == 'awaiting' %}
+            <span style="color:var(--amber-text)">⚠ decide</span>
+          {% else %}
+            <span style="color:var(--text-faint)">○ pending</span>
+          {% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+{% endif %}
+</div>

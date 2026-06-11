@@ -27,6 +27,7 @@ from tl_agent.tools.jira import (
     GetDependenciesTool,
     GetHistoryTool,
     GetTicketTool,
+    ListSprintsTool,
     ListSprintTool,
     PostCommentTool,
     register_jira_tools,
@@ -56,6 +57,7 @@ def test_register_all_tools_no_collisions() -> None:
     assert "list_commits" in names
     assert "search_standup_history" in names
     assert "post_jira_comment" in names
+    assert "list_sprints" in names
 
     # Phase-5 binding excludes writers
     phase5_names = {t.name for t in registry.for_phase5()}
@@ -143,6 +145,31 @@ async def test_list_sprint(httpx_mock: HTTPXMock) -> None:
     assert isinstance(result, ToolResult)
     assert result.value.sprint_id == "S-2026-05"
     assert result.value.sprint_day == 4
+
+
+async def test_list_sprints(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url="http://localhost:9100/rest/agile/1.0/board/ENG/sprint",
+        json={
+            "values": [
+                {"id": "S-2026-04", "name": "Eng Sprint 18", "state": "closed", "board_id": "ENG"},
+                {
+                    "id": "S-2026-05",
+                    "name": "Eng Sprint 19",
+                    "state": "active",
+                    "board_id": "ENG",
+                    "sprint_day": 4,
+                    "sprint_length_days": 10,
+                },
+            ]
+        },
+    )
+    result = await ListSprintsTool().invoke({"board_id": "ENG"}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
+    assert [s.id for s in result.value.sprints] == ["S-2026-04", "S-2026-05"]
+    active = [s for s in result.value.sprints if s.state.value == "active"]
+    assert active[0].name == "Eng Sprint 19"
+    assert active[0].sprint_day == 4
 
 
 async def test_post_jira_comment_writes_with_idempotency(httpx_mock: HTTPXMock) -> None:

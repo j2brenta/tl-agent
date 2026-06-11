@@ -1,0 +1,28 @@
+{% extends "_base.html" %}
+{% block title %}Workflow{% endblock %}
+{% block nav_workflow %}active{% endblock %}
+
+{% block page_data %}
+<script>
+  window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
+  window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+</script>
+{% endblock %}
+
+{% block body %}
+<div class="page-header">
+  <h1>Workflow <span class="sprint-name">morning loop · {{ selected_date }}</span></h1>
+  <form hx-post="/workflow/run" hx-target="#workflow-content" hx-swap="outerHTML"
+        style="margin-left:auto">
+    <input type="hidden" name="date" value="{{ selected_date }}">
+    <button type="submit" class="btn-import">▶ Run now</button>
+  </form>
+</div>
+
+<div id="workflow-content"
+     hx-get="/workflow/fragment?date={{ selected_date }}"
+     hx-trigger="load"
+     hx-swap="outerHTML">
+  <span style="font-size:12px;color:var(--text-faint)">Loading…</span>
+</div>
+{% endblock %}

@@ -22,7 +22,7 @@ from typing import ClassVar
 import httpx
 from pydantic import BaseModel, Field
 
-from tl_agent.models import JiraStatusChange, JiraTicket
+from tl_agent.models import JiraSprint, JiraStatusChange, JiraTicket
 from tl_agent.settings import get_settings
 from tl_agent.tools._http import http_client, raise_from_http_error, raise_from_transport_error
 from tl_agent.tools.base import BaseTool, RetryPolicy
@@ -144,6 +144,44 @@ class GetDependenciesTool(BaseTool[GetDepsIn, GetDepsOut]):
         )
 
 
+# -------------------- list_sprints (board discovery) --------------------
+
+
+class ListSprintsIn(BaseModel):
+    board_id: str = Field(min_length=1, description="Agile board id, e.g. ENG")
+
+
+class ListSprintsOut(BaseModel):
+    board_id: str
+    sprints: list[JiraSprint] = Field(default_factory=list[JiraSprint])
+
+
+class ListSprintsTool(BaseTool[ListSprintsIn, ListSprintsOut]):
+    name: ClassVar[str] = "list_sprints"
+    description: ClassVar[str] = (
+        "List every sprint on an agile board with its name and state "
+        "(active / closed / future). Use this to discover which sprint the "
+        "team is currently working over before pulling its tickets."
+    )
+    input_model: ClassVar[type[BaseModel]] = ListSprintsIn
+    output_model: ClassVar[type[BaseModel]] = ListSprintsOut
+
+    async def _call(self, args: ListSprintsIn) -> ListSprintsOut:
+        async with _client() as client:
+            try:
+                r = await client.get(f"/rest/agile/1.0/board/{args.board_id}/sprint")
+                r.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise_from_http_error(exc, tool_label=self.name)
+            except httpx.HTTPError as exc:
+                raise_from_transport_error(exc, tool_label=self.name)
+        data = r.json()
+        return ListSprintsOut(
+            board_id=args.board_id,
+            sprints=[JiraSprint.model_validate(s) for s in data.get("values", [])],
+        )
+
+
 # -------------------- list_sprint --------------------
 
 
@@ -252,6 +290,7 @@ def register_jira_tools() -> None:
         GetTicketTool,
         GetHistoryTool,
         GetDependenciesTool,
+        ListSprintsTool,
         ListSprintTool,
         PostCommentTool,
     ):

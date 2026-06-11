@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import yaml
 
-from tl_agent.models import Engineer
+from tl_agent.models import Engineer, Role
 from tl_agent.settings import get_settings
 
 # A `## H2` introduces one engineer; bullet lines of the form `- **key:** value`
@@ -24,24 +24,43 @@ _ENGINEER_HEADER = re.compile(r"^##\s+(?P<name>.+?)\s*$", re.MULTILINE)
 # Accepts both `- **key:** value` and `- **key**: value` forms.
 _BULLET = re.compile(r"^-\s+\*\*(?P<key>[^*]+?)\*\*:?\s*(?P<value>.+?)\s*$")
 _LIST_KEYS = {"aliases"}
+# H2 sections that are config, not people — parsed into TeamConfig fields and
+# kept out of `members` so they never hit `Engineer.model_validate`.
+_RESERVED_SECTIONS = {"sprint scope"}
 
 
 @dataclass(frozen=True)
 class TeamConfig:
-    """Parsed `config/team.md`."""
+    """Parsed `config/team.md` — the full roster (engineers + leadership).
 
-    engineers: tuple[Engineer, ...]
+    `members` holds everyone; `engineers` filters to the individual
+    contributors the workflow operates over, so leadership entries never leak
+    into the per-engineer triage/standup loops.
+    """
 
-    def by_id(self, engineer_id: str) -> Engineer | None:
-        for e in self.engineers:
-            if e.id == engineer_id:
-                return e
-        return None
+    members: tuple[Engineer, ...]
+    board_id: str | None = None
+    sprint_name_pattern: str | None = None
+
+    @property
+    def engineers(self) -> tuple[Engineer, ...]:
+        return tuple(m for m in self.members if m.role_kind == Role.ENGINEER)
+
+    @property
+    def team_lead(self) -> Engineer | None:
+        return next((m for m in self.members if m.role_kind == Role.TEAM_LEAD), None)
+
+    @property
+    def product_manager(self) -> Engineer | None:
+        return next((m for m in self.members if m.role_kind == Role.PRODUCT_MANAGER), None)
+
+    def by_id(self, member_id: str) -> Engineer | None:
+        return next((m for m in self.members if m.id == member_id), None)
 
 
-def _parse_engineer_block(name: str, block: str) -> Engineer:
-    """Pull out `- **key:** value` bullets following an `## H2`."""
-    attrs: dict[str, str | tuple[str, ...]] = {"display_name": name}
+def _parse_bullets(block: str) -> dict[str, str | tuple[str, ...]]:
+    """Pull `- **key:** value` bullets from an `## H2` body into a dict."""
+    attrs: dict[str, str | tuple[str, ...]] = {}
     for line in block.splitlines():
         match = _BULLET.match(line.strip())
         if not match:
@@ -52,7 +71,14 @@ def _parse_engineer_block(name: str, block: str) -> Engineer:
             attrs[key] = tuple(p.strip() for p in value.split(",") if p.strip())
         else:
             attrs[key] = value
+    return attrs
+
+
+def _parse_engineer_block(name: str, block: str) -> Engineer:
+    """Pull out `- **key:** value` bullets following an `## H2`."""
+    attrs: dict[str, str | tuple[str, ...]] = {"display_name": name}
     # display_name from the H2 may be overridden by an explicit bullet
+    attrs.update(_parse_bullets(block))
     return Engineer.model_validate(attrs)
 
 
@@ -63,13 +89,29 @@ def load_team(config_dir: Path | None = None) -> TeamConfig:
     text = path.read_text(encoding="utf-8")
 
     headers = list(_ENGINEER_HEADER.finditer(text))
-    engineers: list[Engineer] = []
+    members: list[Engineer] = []
+    board_id: str | None = None
+    sprint_name_pattern: str | None = None
     for i, hdr in enumerate(headers):
+        name = hdr["name"].strip()
         start = hdr.end()
         end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
         block = text[start:end]
-        engineers.append(_parse_engineer_block(hdr["name"].strip(), block))
-    return TeamConfig(engineers=tuple(engineers))
+        if name.lower() in _RESERVED_SECTIONS:
+            attrs = _parse_bullets(block)
+            board_id = _as_str(attrs.get("board_id")) or board_id
+            sprint_name_pattern = _as_str(attrs.get("sprint_name_pattern")) or sprint_name_pattern
+            continue
+        members.append(_parse_engineer_block(name, block))
+    return TeamConfig(
+        members=tuple(members),
+        board_id=board_id,
+        sprint_name_pattern=sprint_name_pattern,
+    )
+
+
+def _as_str(value: str | tuple[str, ...] | None) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def load_markdown(name: str, config_dir: Path | None = None) -> str:

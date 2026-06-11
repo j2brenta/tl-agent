@@ -21,6 +21,7 @@ from tl_agent.models import (
     Prediction,
     PredictionOutcome,
     ResponseMode,
+    Role,
     TriageStatus,
 )
 from tl_agent.storage import connect, initialize, load_team, transaction
@@ -266,6 +267,29 @@ def test_load_team_parses_four_engineers() -> None:
     assert john is not None
     assert john.aliases == ("jdoe", "johnny")
     assert john.gitlab_username == "john"
+
+
+def test_load_team_parses_sprint_scope() -> None:
+    team = load_team()
+    # The reserved `## Sprint scope` section populates board/pattern config…
+    assert team.board_id == "ENG"
+    assert team.sprint_name_pattern == "Eng Sprint .*"
+    # …and never leaks in as a phantom roster member.
+    assert team.by_id("sprint-scope") is None
+    assert all(m.id != "sprint_scope" for m in team.members)
+
+
+def test_load_team_separates_leadership_from_engineers() -> None:
+    team = load_team()
+    # Leadership is excluded from the engineers loop the workflow iterates.
+    assert all(m.role_kind is Role.ENGINEER for m in team.engineers)
+    assert team.team_lead is not None
+    assert team.team_lead.role_kind is Role.TEAM_LEAD
+    assert team.product_manager is not None
+    assert team.product_manager.role_kind is Role.PRODUCT_MANAGER
+    # members is the full roster; by_id resolves leadership too.
+    assert len(team.members) == len(team.engineers) + 2
+    assert team.by_id(team.product_manager.id) is team.product_manager
 
 
 # -------------------- working context --------------------

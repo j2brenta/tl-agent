@@ -10,6 +10,7 @@ from tl_agent.phases import (
     phase6_response_mode,
     phase7_compose,
     phase8_execute,
+    sprint_select,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "phase6_response_mode",
     "phase7_compose",
     "phase8_execute",
+    "sprint_select",
 ]

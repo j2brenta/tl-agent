@@ -28,6 +28,7 @@ from tl_agent.phases import (
     phase5_deepdive,
     phase6_response_mode,
     phase7_compose,
+    sprint_select,
 )
 from tl_agent.phases._context import RunContext
 from tl_agent.phases.phase7_compose import Brief
@@ -59,8 +60,12 @@ class RunResult:
     notes: list[str] = field(default_factory=list[str])
 
 
-async def run(run_date: date | None = None) -> RunResult:
-    """Run the full P0 → P7 pipeline. Returns a RunResult."""
+async def run(run_date: date | None = None, sprint_id: str | None = None) -> RunResult:
+    """Run the full P0 → P7 pipeline. Returns a RunResult.
+
+    `sprint_id`, when given, is a human-resolved sprint from the Workflow tab:
+    it skips discovery and operates over that sprint directly.
+    """
     init_tracing()
     _register_all_tools()
 
@@ -89,6 +94,7 @@ async def run(run_date: date | None = None) -> RunResult:
         team=team,
         idempotency=idempotency,
         budget=budget,
+        sprint_id=sprint_id,
     )
 
     return await _run_pipeline(ctx)
@@ -113,10 +119,16 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
         phase_log.append({"phase": name, "status": status, "duration_s": dur})
 
     signals_summary: dict[str, Any] = {}
+    sprint_decision: dict[str, Any] = {}
 
     def _save_run(status: str) -> None:
         notes_payload = json.dumps(
-            {"phases": phase_log, "errors": list(ctx.notes), "signals": signals_summary}
+            {
+                "phases": phase_log,
+                "errors": list(ctx.notes),
+                "signals": signals_summary,
+                "sprint_decision": sprint_decision,
+            }
         )
         ctx.sqlite.execute(
             """
@@ -138,6 +150,47 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
         )
 
     _save_run("in_progress")
+
+    # Pre-flight: pick the sprint to operate over. A human-resolved sprint_id
+    # skips discovery; otherwise we discover and may park the run for a human.
+    t = _started("sprint_select")
+    if ctx.sprint_id is not None:
+        sprint_decision.update(
+            {
+                "state": "resolved",
+                "chosen": ctx.sprint_id,
+                "candidates": [],
+                "reason": "human-selected",
+            }
+        )
+        _done("sprint_select", t)
+    else:
+        selection = await sprint_select.run(ctx)
+        sprint_decision.update(
+            {
+                "state": selection.state,
+                "chosen": selection.chosen_sprint_id,
+                "candidates": selection.candidates,
+                "reason": selection.reason,
+            }
+        )
+        if selection.state == "pending":
+            _done("sprint_select", t, status="awaiting")
+            _save_run("awaiting_sprint")
+            logger.info(
+                "run.awaiting_sprint", extra={"run_id": ctx.run_id, "reason": selection.reason}
+            )
+            return RunResult(
+                run_id=ctx.run_id,
+                run_date=ctx.run_date,
+                brief=Brief(decisions=[]),
+                open_flag_count=0,
+                closed_flag_count=0,
+                deep_dives_count=0,
+                notes=[*ctx.notes, f"awaiting sprint decision: {selection.reason}"],
+            )
+        ctx.sprint_id = selection.chosen_sprint_id
+        _done("sprint_select", t)
 
     t = _started("phase0_loop_closure")
     await phase0_loop_closure.run(ctx)

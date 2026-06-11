@@ -24,6 +24,8 @@ from tl_agent.web.routes import decisions as decisions_route
 from tl_agent.web.routes import review as review_route
 from tl_agent.web.routes import runs as runs_route
 from tl_agent.web.routes import sprint as sprint_route
+from tl_agent.web.routes import team as team_route
+from tl_agent.web.routes import workflow as workflow_route
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,8 @@ app.include_router(review_route.router)
 app.include_router(decisions_route.router)
 app.include_router(sprint_route.router)
 app.include_router(runs_route.router)
+app.include_router(team_route.router)
+app.include_router(workflow_route.router)
 
 
 @app.post("/jira/import", response_class=HTMLResponse)
