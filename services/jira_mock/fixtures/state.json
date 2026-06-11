@@ -1,5 +1,13 @@
 {
   "board_id": "ENG",
+  "boards": [
+    {
+      "id": "ENG",
+      "name": "Engineering",
+      "project_key": "ENG",
+      "type": "scrum"
+    }
+  ],
   "history": {
     "ENG-12": [
       {

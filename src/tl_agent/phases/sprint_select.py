@@ -21,12 +21,15 @@ from tl_agent.models import JiraSprint, JiraSprintState
 from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
 from tl_agent.phases._sprint import sprint_progress
+from tl_agent.storage.repos import resolved_config
 from tl_agent.tools import ToolResult
-from tl_agent.tools.jira import ListSprintsTool
+from tl_agent.tools.jira import ListBoardsTool, ListSprintsTool
 
 logger = logging.getLogger(__name__)
 
 SelectionState = Literal["auto", "pending"]
+# Which decision a `pending` selection is asking the human to make.
+DecisionKind = Literal["sprint", "board"]
 
 
 @dataclass(frozen=True)
@@ -36,12 +39,15 @@ class SprintSelection:
     `auto` → `chosen_sprint_id` is set (or None to mean "fall back to active");
     the pipeline proceeds. `pending` → ambiguity that needs a human; the
     orchestrator parks the run as `awaiting_sprint` and surfaces `candidates`.
+    `kind` says what the human is picking — a sprint (the usual case) or, when
+    `board_id` wasn't configured and discovery found several, a board.
     """
 
     state: SelectionState
     reason: str
     chosen_sprint_id: str | None = None
     candidates: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    kind: DecisionKind = "sprint"
 
 
 def _candidate_dict(s: JiraSprint, run_date: date) -> dict[str, Any]:
@@ -55,22 +61,66 @@ def _candidate_dict(s: JiraSprint, run_date: date) -> dict[str, Any]:
     }
 
 
+async def _resolve_board(ctx: RunContext) -> str | SprintSelection:
+    """Resolve the team's Jira board, returning its id or a decision to bubble up.
+
+    Precedence: `config/team.md` override → DB resolved cache → live discovery.
+    Exactly one discovered board is cached and used; several hand a "which
+    board?" choice to a human; none degrades to no-sprint.
+    """
+    board_id = ctx.team.board_id or resolved_config.get(ctx.sqlite, resolved_config.JIRA_BOARD_KEY)
+    if board_id:
+        return board_id
+
+    outcome = await ListBoardsTool().invoke({}, run_date_iso=ctx.run_date_iso)
+    if not isinstance(outcome, ToolResult):
+        ctx.notes.append(f"sprint_select: board discovery failed ({outcome.kind.value})")
+        return SprintSelection(state="auto", reason=f"board discovery failed: {outcome.kind.value}")
+
+    boards = outcome.value.boards
+    if len(boards) == 1:
+        chosen = boards[0]
+        resolved_config.set(ctx.sqlite, resolved_config.JIRA_BOARD_KEY, chosen.id)
+        ctx.notes.append(
+            f"sprint_select: discovered Jira board {chosen.id!r} ({chosen.name}); cached. "
+            f"Add `- **board_id:** {chosen.id}` under Sprint scope in config/team.md to pin it."
+        )
+        return chosen.id
+    if not boards:
+        ctx.notes.append("sprint_select: no Jira boards discovered")
+        return SprintSelection(state="auto", reason="no Jira boards discovered")
+
+    ctx.notes.append(f"sprint_select: {len(boards)} Jira boards; awaiting human board choice")
+    return SprintSelection(
+        state="pending",
+        kind="board",
+        reason="multiple Jira boards — choose the team's board",
+        candidates=[{"id": b.id, "name": b.name} for b in boards],
+    )
+
+
 @phase_span("sprint_select")
 async def run(ctx: RunContext) -> SprintSelection:
     """Discover the team's current sprint.
 
-    Pull the board's **active** sprints, keep those whose name matches the team
-    pattern, and auto-select when exactly one survives. Zero or several matches
-    propagate the "which sprint is current?" decision to a human (the run parks
-    as `awaiting_sprint` and the candidates surface on the Workflow tab).
+    First resolve the board (config override → DB cache → discovery, asking a
+    human if several boards exist). Then pull that board's **active** sprints,
+    keep those whose name matches the team pattern, and auto-select when exactly
+    one survives. Zero or several matches propagate the "which sprint is
+    current?" decision to a human (the run parks as `awaiting_sprint` and the
+    candidates surface on the Workflow tab).
     """
-    board_id = ctx.team.board_id
+    board = await _resolve_board(ctx)
+    if isinstance(board, SprintSelection):
+        return board
+    board_id = board
+
     pattern = ctx.team.sprint_name_pattern
-    if not board_id or not pattern:
-        # No board/pattern configured — without a board there's no sprint to
-        # discover, so Phase 1 will collect an empty sprint and note it.
-        ctx.notes.append("sprint_select: board_id/sprint_name_pattern not configured; using active")
-        return SprintSelection(state="auto", reason="no board/pattern configured")
+    if not pattern:
+        # Board known but no team filter — can't tell sprints apart; let Phase 1
+        # collect an empty sprint rather than guess.
+        ctx.notes.append("sprint_select: sprint_name_pattern not configured; using active")
+        return SprintSelection(state="auto", reason="no sprint_name_pattern configured")
 
     tool = ListSprintsTool()
     outcome = await tool.invoke(

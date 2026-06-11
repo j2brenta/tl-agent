@@ -251,21 +251,30 @@ async def workflow_resolve(run_id: str = Form(...), sprint_id: str = Form(...)) 
 
     selected = row["run_date"]
     # Mark the parked run resolved (with a pointer to the choice) for the audit
-    # trail; the actual work runs as a fresh pipeline with the chosen sprint.
+    # trail; the actual work runs as a fresh pipeline with the choice applied.
     notes: dict[str, Any] = {}
     if row["notes"]:
         with contextlib.suppress(Exception):
             notes = json.loads(row["notes"])
     sd = notes.setdefault("sprint_decision", {})
+    kind = sd.get("kind", "sprint")
     sd["state"] = "resolved"
-    sd["chosen"] = sprint_id
+    sd["chosen"] = sprint_id  # carries the chosen candidate id (sprint or board)
     conn.execute(
         "UPDATE runs SET status = 'resolved', notes = ? WHERE id = ?",
         (json.dumps(notes), run_id),
     )
-    conn.commit()
+    if kind == "board":
+        # Persist the board so future runs skip discovery; re-run from scratch
+        # so sprint discovery proceeds against the now-known board.
+        from tl_agent.storage.repos import resolved_config
 
-    _schedule_run(date_.fromisoformat(selected), sprint_id=sprint_id)
+        resolved_config.set(conn, resolved_config.JIRA_BOARD_KEY, sprint_id)
+        conn.commit()
+        _schedule_run(date_.fromisoformat(selected), sprint_id=None)
+    else:
+        conn.commit()
+        _schedule_run(date_.fromisoformat(selected), sprint_id=sprint_id)
     return _fragment(selected, just_triggered=True)
 
 

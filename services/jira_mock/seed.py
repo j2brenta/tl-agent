@@ -124,12 +124,15 @@ def build_state() -> dict[str, object]:
         },
     ]
 
+    boards = [{"id": BOARD_ID, "name": "Engineering", "type": "scrum", "project_key": "ENG"}]
+
     return {
         "tickets": tickets,
         "history": history,
         "links": links,
         "sprint": sprint,
         "board_id": BOARD_ID,
+        "boards": boards,
         "sprints": sprints,
     }
 

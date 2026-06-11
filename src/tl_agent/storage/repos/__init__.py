@@ -1,6 +1,14 @@
 """Repository functions — one module per table, exported here as namespaces."""
 
-from tl_agent.storage.repos import baselines, decisions, flags, observations, predictions, snapshots
+from tl_agent.storage.repos import (
+    baselines,
+    decisions,
+    flags,
+    observations,
+    predictions,
+    resolved_config,
+    snapshots,
+)
 
 __all__ = [
     "baselines",
@@ -8,5 +16,6 @@ __all__ = [
     "flags",
     "observations",
     "predictions",
+    "resolved_config",
     "snapshots",
 ]

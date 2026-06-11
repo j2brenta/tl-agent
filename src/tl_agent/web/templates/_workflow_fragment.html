@@ -19,7 +19,7 @@
       {% elif run.status == 'in_progress' %}
         <span class="badge badge-blue" style="font-size:10px">running…</span>
       {% elif run.status == 'awaiting_sprint' %}
-        <span class="badge badge-amber" style="font-size:10px">awaiting sprint decision</span>
+        <span class="badge badge-amber" style="font-size:10px">awaiting {{ run.sprint_decision.kind or 'sprint' }} decision</span>
       {% elif run.status == 'resolved' %}
         <span class="badge badge-gray" style="font-size:10px">resolved</span>
       {% else %}
@@ -31,7 +31,7 @@
     {% if run.status == 'awaiting_sprint' and run.sprint_decision.state == 'pending' %}
     <div class="banner banner-warn" style="margin-bottom:14px">
       <span>⚠</span>
-      <span>Sprint discovery needs a human: {{ run.sprint_decision.reason }}.</span>
+      <span>{{ (run.sprint_decision.kind or 'sprint')|capitalize }} discovery needs a human: {{ run.sprint_decision.reason }}.</span>
     </div>
     <form hx-post="/workflow/sprint/resolve" hx-target="#workflow-content" hx-swap="outerHTML"
           style="margin-bottom:6px">
@@ -42,7 +42,7 @@
           <input type="radio" name="sprint_id" value="{{ c.id }}" {% if loop.first %}checked{% endif %}>
           <span style="font-family:var(--mono)">{{ c.id }}</span>
           <span>{{ c.name }}</span>
-          <span class="badge badge-{% if c.state == 'active' %}green{% elif c.state == 'future' %}blue{% else %}gray{% endif %}" style="font-size:10px">{{ c.state }}</span>
+          {% if c.state %}<span class="badge badge-{% if c.state == 'active' %}green{% elif c.state == 'future' %}blue{% else %}gray{% endif %}" style="font-size:10px">{{ c.state }}</span>{% endif %}
           {% if c.sprint_day %}<span style="font-size:11px;color:var(--text-faint)">day {{ c.sprint_day }}/{{ c.sprint_length_days }}</span>{% endif %}
         </label>
         {% endfor %}

@@ -55,6 +55,7 @@ def _load_state() -> dict[str, Any]:
             "links": {},
             "sprint": {"sprint_id": "S-2026-05", "issues": []},
             "board_id": "ENG",
+            "boards": [{"id": "ENG", "name": "Engineering", "type": "scrum", "project_key": "ENG"}],
             "sprints": [
                 {
                     "id": "S-2026-05",
@@ -119,6 +120,15 @@ def _render_changelog(key: str) -> dict[str, Any]:
             }
         )
     return _page(values)
+
+
+def _render_board(board: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": board["id"],
+        "name": board.get("name"),
+        "type": board.get("type", "scrum"),
+        "location": {"projectKey": board.get("project_key")},
+    }
 
 
 def _render_sprint_meta(meta: dict[str, Any]) -> dict[str, Any]:
@@ -207,6 +217,13 @@ def post_comment(ver: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 # -------------------- Agile API (version-independent) --------------------
+
+
+@app.get("/rest/agile/1.0/board")
+def get_boards() -> dict[str, Any]:
+    """List the agile boards (board discovery)."""
+    boards: list[dict[str, Any]] = state.get("boards") or []
+    return _page([_render_board(b) for b in boards])
 
 
 @app.get("/rest/agile/1.0/board/{board_id}/sprint")

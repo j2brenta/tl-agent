@@ -29,6 +29,7 @@ from tl_agent.tools.jira import (
     GetDependenciesTool,
     GetHistoryTool,
     GetTicketTool,
+    ListBoardsTool,
     ListSprintsTool,
     ListSprintTool,
     PostCommentTool,
@@ -263,6 +264,27 @@ async def test_list_sprint_by_board_discovers_active(httpx_mock: HTTPXMock) -> N
     result = await ListSprintTool().invoke({"board_id": "ENG"}, run_date_iso="2026-05-22")
     assert isinstance(result, ToolResult)
     assert result.value.sprint_id == "S-2026-05"
+
+
+async def test_list_boards(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url=re.compile(r".*/rest/agile/1.0/board(\?|$)"),
+        json={
+            "values": [
+                {
+                    "id": 11,
+                    "name": "Engineering",
+                    "type": "scrum",
+                    "location": {"projectKey": "ENG"},
+                },
+                {"id": 22, "name": "Ops", "type": "kanban"},
+            ],
+            "isLast": True,
+        },
+    )
+    result = await ListBoardsTool().invoke({}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
+    assert [(b.id, b.project_key) for b in result.value.boards] == [("11", "ENG"), ("22", None)]
 
 
 async def test_list_sprints(httpx_mock: HTTPXMock) -> None:

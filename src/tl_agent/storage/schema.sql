@@ -174,5 +174,16 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 );
 CREATE INDEX IF NOT EXISTS idempotency_by_age ON idempotency_keys(created_at);
 
+-- ---------- resolved_config ----------
+-- Values the agent *resolved* at runtime rather than the human authoring them
+-- in config/ (LAYER 1). Today: a Jira board discovered when team.md omits
+-- `board_id`. config/team.md remains the override; this is the learned cache
+-- so we don't re-discover (or re-ask) every run. Cleared on DB reset.
+CREATE TABLE IF NOT EXISTS resolved_config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL          -- RFC3339, when it was last resolved
+);
+
 -- ---------- schema_meta seed ----------
 INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1');

@@ -223,6 +223,16 @@ def _status_changes(values: list[dict[str, Any]]) -> list[JiraStatusChange]:
     return changes
 
 
+def _board_from_meta(board: dict[str, Any]) -> JiraBoard:
+    location: dict[str, Any] = board.get("location") or {}
+    return JiraBoard(
+        id=str(board["id"]),
+        name=board.get("name") or str(board["id"]),
+        type=board.get("type"),
+        project_key=location.get("projectKey"),
+    )
+
+
 def _sprint_from_meta(meta: dict[str, Any], *, board_id: str | None = None) -> JiraSprint:
     origin = meta.get("originBoardId") or meta.get("board_id") or board_id
     return JiraSprint(
@@ -391,6 +401,44 @@ class GetDependenciesTool(BaseTool[GetDepsIn, GetDepsOut]):
         fields: dict[str, Any] = payload.get("fields") or {}
         blocks, blocked_by = _links_from_fields(fields.get("issuelinks"))
         return GetDepsOut(key=args.key, blocks=list(blocks), blocked_by=list(blocked_by))
+
+
+# -------------------- list_boards (board discovery) --------------------
+
+
+class ListBoardsIn(BaseModel):
+    project: str | None = Field(
+        default=None, description="Optional Jira projectKeyOrId to scope the board list."
+    )
+
+
+class JiraBoard(BaseModel):
+    id: str = Field(min_length=1)
+    name: str
+    type: str | None = None
+    project_key: str | None = None
+
+
+class ListBoardsOut(BaseModel):
+    boards: list[JiraBoard] = Field(default_factory=list[JiraBoard])
+
+
+class ListBoardsTool(BaseTool[ListBoardsIn, ListBoardsOut]):
+    name: ClassVar[str] = "list_boards"
+    description: ClassVar[str] = (
+        "List the Jira agile boards (optionally scoped to a project). Used to "
+        "discover the team's board when `board_id` isn't configured."
+    )
+    input_model: ClassVar[type[BaseModel]] = ListBoardsIn
+    output_model: ClassVar[type[BaseModel]] = ListBoardsOut
+
+    async def _call(self, args: ListBoardsIn) -> ListBoardsOut:
+        params = {"projectKeyOrId": args.project} if args.project else None
+        async with _client() as client:
+            values = await _paginate(
+                client, "/rest/agile/1.0/board", "values", self.name, params=params
+            )
+        return ListBoardsOut(boards=[_board_from_meta(v) for v in values])
 
 
 # -------------------- list_sprints (board discovery) --------------------
@@ -576,6 +624,7 @@ def register_jira_tools() -> None:
         GetTicketTool,
         GetHistoryTool,
         GetDependenciesTool,
+        ListBoardsTool,
         ListSprintsTool,
         ListSprintTool,
         PostCommentTool,

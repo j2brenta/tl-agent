@@ -293,6 +293,18 @@ def test_team_resolve_matches_jira_account_id_and_display_name() -> None:
     assert team.resolve(None) is None
 
 
+def test_resolved_config_round_trip(db: sqlite3.Connection) -> None:
+    from tl_agent.storage.repos import resolved_config
+
+    key = resolved_config.JIRA_BOARD_KEY
+    assert resolved_config.get(db, key) is None
+    resolved_config.set(db, key, "ENG")
+    assert resolved_config.get(db, key) == "ENG"
+    # Upsert replaces in place.
+    resolved_config.set(db, key, "OPS")
+    assert resolved_config.get(db, key) == "OPS"
+
+
 def test_load_team_separates_leadership_from_engineers() -> None:
     team = load_team()
     # Leadership is excluded from the engineers loop the workflow iterates.

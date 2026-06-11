@@ -172,6 +172,7 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
                 "chosen": selection.chosen_sprint_id,
                 "candidates": selection.candidates,
                 "reason": selection.reason,
+                "kind": selection.kind,
             }
         )
         if selection.state == "pending":
