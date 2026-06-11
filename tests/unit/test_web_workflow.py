@@ -9,16 +9,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tl_agent.models import GitCommit, JiraStatus, JiraTicket
 from tl_agent.storage import connect, initialize
 from tl_agent.web.routes import workflow as wf
-from tl_agent.web.routes.workflow import _milestones
+from tl_agent.web.routes.workflow import _collect_window, _milestones, _ticket_rows
 
 # -------------------- pure milestone projection --------------------
 
@@ -216,3 +217,69 @@ def test_resolve_marks_resolved_and_reschedules(client: TestClient, tmp_path: Pa
     conn.close()
     assert row["status"] == "resolved"
     assert json.loads(row["notes"])["sprint_decision"]["chosen"] == "S-2026-05"
+
+
+# -------------------- data collection (Jira + GitLab) --------------------
+
+
+def _ticket(key: str, assignee: str | None) -> JiraTicket:
+    return JiraTicket(
+        key=key,
+        summary=f"work on {key}",
+        status=JiraStatus.IN_PROGRESS,
+        assignee=assignee,
+        points=3.0,
+        created_at=datetime(2026, 5, 19, 9, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 5, 22, 9, 0, tzinfo=UTC),
+    )
+
+
+def test_collect_window_is_yesterday_noon_to_today_noon() -> None:
+    since, until = _collect_window("2026-05-22")
+    assert until == datetime(2026, 5, 22, 12, 0, tzinfo=UTC)
+    assert since == datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
+
+
+def test_ticket_rows_flag_missing_and_unknown() -> None:
+    rows = _ticket_rows(
+        [_ticket("ENG-1", "john"), _ticket("ENG-2", None), _ticket("ENG-3", "ghost")]
+    )
+    by_key = {r["ticket"].key: r for r in rows}
+    assert by_key["ENG-1"]["resolved_id"] == "john"
+    assert by_key["ENG-1"]["missing"] is False and by_key["ENG-1"]["unknown"] is False
+    assert by_key["ENG-2"]["missing"] is True
+    assert by_key["ENG-3"]["unknown"] is True and by_key["ENG-3"]["assignee"] == "ghost"
+
+
+def test_collect_route_renders_tickets_and_commits(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_jira(selected: str) -> tuple[str | None, list[JiraTicket], str | None]:
+        return "S-2026-05", [_ticket("ENG-1", "john"), _ticket("ENG-9", None)], None
+
+    async def _fake_gitlab(
+        selected: str, since: datetime, until: datetime
+    ) -> tuple[list[GitCommit], str | None]:
+        commit = GitCommit(
+            sha="abcdef1234567",
+            author="john",
+            committed_at=datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
+            message="fix publisher retry [ENG-1]",
+            files_changed=2,
+            insertions=10,
+            deletions=3,
+            linked_ticket_keys=("ENG-1",),
+        )
+        return [commit], None
+
+    monkeypatch.setattr(wf, "_collect_jira", _fake_jira)
+    monkeypatch.setattr(wf, "_collect_gitlab", _fake_gitlab)
+
+    r = client.post("/workflow/collect", data={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert "S-2026-05" in r.text
+    assert "ENG-1" in r.text and "ENG-9" in r.text
+    assert "⚠ 1 unassigned" in r.text  # ENG-9 has no assignee
+    assert "unassigned" in r.text
+    assert "fix publisher retry" in r.text  # commit message line
+    assert "abcdef12" in r.text  # short sha

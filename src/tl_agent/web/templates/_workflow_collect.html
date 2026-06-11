@@ -1,0 +1,76 @@
+{# HTMX fragment: one-shot raw pull of Jira sprint tickets + GitLab commits. #}
+{% set status_badge = {
+  "todo": "gray", "in_progress": "blue", "in_review": "purple",
+  "done": "green", "blocked": "red"} %}
+
+<div class="card" style="margin-bottom:16px">
+  <div class="section-label">
+    Jira — sprint {{ sprint_id or "?" }}
+    <span style="color:var(--text-faint);font-weight:400">· {{ rows | length }} tickets</span>
+    {% if missing_count %}<span class="badge badge-amber" style="margin-left:6px">⚠ {{ missing_count }} unassigned</span>{% endif %}
+    {% if unknown_count %}<span class="badge badge-amber" style="margin-left:6px">⚠ {{ unknown_count }} off-team</span>{% endif %}
+  </div>
+
+  {% if jira_err %}
+  <div class="banner banner-warn"><span>⚠</span><span>Jira fetch failed: {{ jira_err }}</span></div>
+  {% elif not rows %}
+  <div style="font-size:13px;color:var(--text-muted)">No tickets in the sprint.</div>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Key</th><th>Summary</th><th>Status</th><th>Assignee</th><th>Pts</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td style="font-family:var(--mono);white-space:nowrap">{{ row.ticket.key }}</td>
+        <td>{{ row.ticket.summary }}</td>
+        <td><span class="badge badge-{{ status_badge.get(row.ticket.status.value, 'gray') }}">{{ row.ticket.status.value }}</span></td>
+        <td>
+          {% if row.missing %}
+            <span class="badge badge-amber" title="No assignee">⚠ unassigned</span>
+          {% elif row.unknown %}
+            <span class="badge badge-amber" title="Assignee does not resolve to a team member">⚠ {{ row.assignee }}</span>
+          {% else %}
+            <code>{{ row.resolved_id }}</code>
+          {% endif %}
+        </td>
+        <td style="color:var(--text-muted)">{{ row.ticket.points if row.ticket.points is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="section-label">
+    GitLab — commits
+    <span style="color:var(--text-faint);font-weight:400">· {{ commits | length }} in window</span>
+    <span style="color:var(--text-faint);font-weight:400;font-size:11px">
+      (<time datetime="{{ since }}">{{ since[:16].replace('T',' ') }}</time> →
+       <time datetime="{{ until }}">{{ until[:16].replace('T',' ') }}</time> UTC)
+    </span>
+  </div>
+
+  {% if gitlab_err %}
+  <div class="banner banner-warn"><span>⚠</span><span>GitLab fetch failed: {{ gitlab_err }}</span></div>
+  {% elif not commits %}
+  <div style="font-size:13px;color:var(--text-muted)">No commits in this window.</div>
+  {% else %}
+  <div style="display:flex;flex-direction:column;gap:8px">
+    {% for c in commits %}
+    <div style="display:flex;align-items:baseline;gap:10px;font-size:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+      <span style="font-family:var(--mono);color:var(--text-faint)">{{ c.sha[:8] }}</span>
+      <span style="font-weight:500;min-width:60px">{{ c.author }}</span>
+      <span style="flex:1">{{ c.message.splitlines()[0] if c.message else "" }}
+        {% if c.linked_ticket_keys %}<span style="color:var(--text-faint);font-family:var(--mono)">[{{ c.linked_ticket_keys | join(', ') }}]</span>{% endif %}
+      </span>
+      <span style="color:var(--green)">+{{ c.insertions }}</span>
+      <span style="color:var(--red)">-{{ c.deletions }}</span>
+      <time datetime="{{ c.committed_at.isoformat() }}" style="color:var(--text-faint);white-space:nowrap">{{ c.committed_at.strftime('%H:%M') }}</time>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

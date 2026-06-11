@@ -7,17 +7,33 @@
   window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
   window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
 </script>
+<style>
+  /* htmx toggles `htmx-request` on the hx-indicator target during the fetch. */
+  #collect-spin { display: none; }
+  #collect-spin.htmx-request { display: block; }
+</style>
 {% endblock %}
 
 {% block body %}
 <div class="page-header">
   <h1>Workflow <span class="sprint-name">morning loop · {{ selected_date }}</span></h1>
-  <form hx-post="/workflow/run" hx-target="#workflow-content" hx-swap="outerHTML"
-        style="margin-left:auto">
-    <input type="hidden" name="date" value="{{ selected_date }}">
-    <button type="submit" class="btn-import">▶ Run now</button>
-  </form>
+  <div style="margin-left:auto;display:flex;gap:8px">
+    <form hx-post="/workflow/collect" hx-target="#workflow-collect" hx-swap="innerHTML"
+          hx-indicator="#collect-spin">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <button type="submit" class="btn-import">⤓ Collect Jira + GitLab</button>
+    </form>
+    <form hx-post="/workflow/run" hx-target="#workflow-content" hx-swap="outerHTML">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <button type="submit" class="btn-import">▶ Run now</button>
+    </form>
+  </div>
 </div>
+
+<div id="collect-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
+  Fetching Jira + GitLab…
+</div>
+<div id="workflow-collect"></div>
 
 <div id="workflow-content"
      hx-get="/workflow/fragment?date={{ selected_date }}"

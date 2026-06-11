@@ -6,6 +6,8 @@ Routes:
   POST /workflow/run              — kick off the pipeline for a date (background)
   POST /workflow/sprint/resolve   — resolve an `awaiting_sprint` run by picking
                                     a sprint; relaunches the run with that choice
+  POST /workflow/collect          — one-shot raw pull of Jira sprint tickets +
+                                    GitLab commits (no pipeline), for inspection
 
 The milestone view is a friendly projection of the `runs` table
 (`notes.phases` + `notes.signals` + `notes.sprint_decision`) — the same data the
@@ -19,6 +21,7 @@ import contextlib
 import json
 import logging
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from datetime import date as date_
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,8 @@ from typing import Any
 from fastapi import APIRouter, Form
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from tl_agent.models import GitCommit, JiraTicket
 
 logger = logging.getLogger(__name__)
 
@@ -262,3 +267,100 @@ async def workflow_resolve(run_id: str = Form(...), sprint_id: str = Form(...)) 
 
     _schedule_run(date_.fromisoformat(selected), sprint_id=sprint_id)
     return _fragment(selected, just_triggered=True)
+
+
+# -------------------- raw data collection (Jira + GitLab) --------------------
+
+
+def _collect_window(selected: str) -> tuple[datetime, datetime]:
+    """Standup window: yesterday 12:00 → today 12:00 UTC, anchored on `selected`."""
+    run_date = date_.fromisoformat(selected)
+    until = datetime(run_date.year, run_date.month, run_date.day, 12, 0, tzinfo=UTC)
+    return until - timedelta(days=1), until
+
+
+async def _collect_jira(selected: str) -> tuple[str | None, list[JiraTicket], str | None]:
+    """Pull the active sprint's tickets. Returns (sprint_id, tickets, error)."""
+    from tl_agent.tools import ToolResult
+    from tl_agent.tools.jira import ListSprintTool
+
+    outcome = await ListSprintTool().invoke({}, run_date_iso=selected)
+    if isinstance(outcome, ToolResult):
+        return outcome.value.sprint_id, list(outcome.value.tickets), None
+    return None, [], outcome.message
+
+
+async def _collect_gitlab(
+    selected: str, since: datetime, until: datetime
+) -> tuple[list[GitCommit], str | None]:
+    """Pull commits in the window. Returns (commits, error)."""
+    from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects
+    from tl_agent.tools import ToolResult
+    from tl_agent.tools.gitlab import ListCommitsTool
+
+    projects = sorted(load_allowed_gitlab_projects())
+    project = projects[0] if projects else "tl-agent/demo"
+    outcome = await ListCommitsTool().invoke(
+        {"project": project, "since": since.isoformat(), "until": until.isoformat()},
+        run_date_iso=selected,
+    )
+    if isinstance(outcome, ToolResult):
+        return list(outcome.value.commits), None
+    return [], outcome.message
+
+
+def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
+    """Annotate each ticket with assignment health for the table.
+
+    `missing` = no assignee at all; `unknown` = an assignee that doesn't resolve
+    to anyone on the team (a likely identity-mapping gap, see the Team tab).
+    """
+    from tl_agent.storage import load_team
+
+    team = load_team()
+
+    def resolve(handle: str | None) -> str | None:
+        if not handle:
+            return None
+        return next((e.id for e in team.engineers if e.matches(handle)), None)
+
+    rows: list[dict[str, Any]] = []
+    for t in sorted(tickets, key=lambda x: x.key):
+        assignee = (t.assignee or "").strip() or None
+        resolved = resolve(assignee)
+        rows.append(
+            {
+                "ticket": t,
+                "assignee": assignee,
+                "resolved_id": resolved,
+                "missing": assignee is None,
+                "unknown": assignee is not None and resolved is None,
+            }
+        )
+    return rows
+
+
+@router.post("/workflow/collect", response_class=HTMLResponse)
+async def workflow_collect(date: str | None = Form(None)) -> HTMLResponse:
+    selected = _coerce_date(date)
+    since, until = _collect_window(selected)
+
+    sprint_id, tickets, jira_err = await _collect_jira(selected)
+    commits, gitlab_err = await _collect_gitlab(selected, since, until)
+
+    rows = _ticket_rows(tickets)
+    template = _env.get_template("_workflow_collect.html")
+    return HTMLResponse(
+        template.render(
+            selected_date=selected,
+            since=since.isoformat(),
+            until=until.isoformat(),
+            sprint_id=sprint_id,
+            rows=rows,
+            missing_count=sum(1 for r in rows if r["missing"]),
+            unknown_count=sum(1 for r in rows if r["unknown"]),
+            commits=sorted(commits, key=lambda c: c.committed_at, reverse=True),
+            jira_err=jira_err,
+            gitlab_err=gitlab_err,
+        )
+    )
