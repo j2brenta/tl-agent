@@ -398,6 +398,10 @@ class GetDependenciesTool(BaseTool[GetDepsIn, GetDepsOut]):
 
 class ListSprintsIn(BaseModel):
     board_id: str = Field(min_length=1, description="Agile board id, e.g. ENG")
+    state: str | None = Field(
+        default=None,
+        description="Optional Agile state filter, e.g. 'active' (else all sprints).",
+    )
 
 
 class ListSprintsOut(BaseModel):
@@ -416,9 +420,14 @@ class ListSprintsTool(BaseTool[ListSprintsIn, ListSprintsOut]):
     output_model: ClassVar[type[BaseModel]] = ListSprintsOut
 
     async def _call(self, args: ListSprintsIn) -> ListSprintsOut:
+        params = {"state": args.state} if args.state else None
         async with _client() as client:
             values = await _paginate(
-                client, f"/rest/agile/1.0/board/{args.board_id}/sprint", "values", self.name
+                client,
+                f"/rest/agile/1.0/board/{args.board_id}/sprint",
+                "values",
+                self.name,
+                params=params,
             )
         return ListSprintsOut(
             board_id=args.board_id,

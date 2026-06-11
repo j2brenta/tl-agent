@@ -49,13 +49,15 @@ async def test_single_active_in_scope_auto_selects(httpx_mock: HTTPXMock) -> Non
         httpx_mock,
         [
             _sprint("S-2026-04", "Eng Sprint 18", "closed"),
-            _sprint("S-2026-05", "Eng Sprint 19", "active", sprint_day=4, sprint_length_days=10),
+            _sprint("S-2026-05", "Eng Sprint 19", "active"),
             _sprint("S-2026-06", "Eng Sprint 20", "future"),
         ],
     )
     sel = await sprint_select.run(_ctx())
     assert sel.state == "auto"
     assert sel.chosen_sprint_id == "S-2026-05"
+    # Discovery asks the board for active sprints only.
+    assert httpx_mock.get_requests()[0].url.params["state"] == "active"
 
 
 async def test_multiple_active_matches_gates(httpx_mock: HTTPXMock) -> None:
@@ -72,7 +74,8 @@ async def test_multiple_active_matches_gates(httpx_mock: HTTPXMock) -> None:
 
 
 async def test_no_active_match_gates(httpx_mock: HTTPXMock) -> None:
-    # Active sprint exists but its name is out of scope; the in-scope one is future.
+    # Active sprints exist but none match the team scope; gate for a human and
+    # offer the active sprints to pick from. The future one is not considered.
     _board(
         httpx_mock,
         [
@@ -82,15 +85,21 @@ async def test_no_active_match_gates(httpx_mock: HTTPXMock) -> None:
     )
     sel = await sprint_select.run(_ctx())
     assert sel.state == "pending"
-    # The future in-scope sprint is offered as a candidate.
-    assert "S-2026-06" in {c["id"] for c in sel.candidates}
+    assert {c["id"] for c in sel.candidates} == {"OPS-1"}
 
 
-async def test_closed_sprints_are_never_in_scope(httpx_mock: HTTPXMock) -> None:
-    _board(httpx_mock, [_sprint("S-2026-04", "Eng Sprint 18", "closed")])
+async def test_no_active_sprints_at_all_gates_with_no_candidates(httpx_mock: HTTPXMock) -> None:
+    # Between sprints — only closed/future exist, nothing active to operate over.
+    _board(
+        httpx_mock,
+        [
+            _sprint("S-2026-04", "Eng Sprint 18", "closed"),
+            _sprint("S-2026-06", "Eng Sprint 20", "future"),
+        ],
+    )
     sel = await sprint_select.run(_ctx())
     assert sel.state == "pending"
-    assert all(c["state"] != "closed" for c in sel.candidates) or sel.candidates == []
+    assert sel.candidates == []
 
 
 async def test_missing_config_falls_back_to_active() -> None:

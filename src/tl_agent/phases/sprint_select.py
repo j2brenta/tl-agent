@@ -57,7 +57,13 @@ def _candidate_dict(s: JiraSprint, run_date: date) -> dict[str, Any]:
 
 @phase_span("sprint_select")
 async def run(ctx: RunContext) -> SprintSelection:
-    """Discover the current in-scope sprint for the team's board."""
+    """Discover the team's current sprint.
+
+    Pull the board's **active** sprints, keep those whose name matches the team
+    pattern, and auto-select when exactly one survives. Zero or several matches
+    propagate the "which sprint is current?" decision to a human (the run parks
+    as `awaiting_sprint` and the candidates surface on the Workflow tab).
+    """
     board_id = ctx.team.board_id
     pattern = ctx.team.sprint_name_pattern
     if not board_id or not pattern:
@@ -67,22 +73,24 @@ async def run(ctx: RunContext) -> SprintSelection:
         return SprintSelection(state="auto", reason="no board/pattern configured")
 
     tool = ListSprintsTool()
-    outcome = await tool.invoke({"board_id": board_id}, run_date_iso=ctx.run_date_iso)
+    outcome = await tool.invoke(
+        {"board_id": board_id, "state": "active"}, run_date_iso=ctx.run_date_iso
+    )
     if not isinstance(outcome, ToolResult):
         ctx.notes.append(
-            f"sprint_select: board sprint list failed ({outcome.kind.value}); using active"
+            f"sprint_select: active sprint list failed ({outcome.kind.value}); using active"
         )
         return SprintSelection(state="auto", reason=f"discovery failed: {outcome.kind.value}")
 
-    sprints = outcome.value.sprints
+    # Defensive: keep only active sprints even if the API ignored `state`.
+    active = [s for s in outcome.value.sprints if s.state is JiraSprintState.ACTIVE]
     try:
         rx = re.compile(pattern)
     except re.error as exc:
         ctx.notes.append(f"sprint_select: bad sprint_name_pattern {pattern!r}: {exc}; using active")
         return SprintSelection(state="auto", reason=f"bad pattern: {exc}")
 
-    in_scope = [s for s in sprints if rx.search(s.name) and s.state is not JiraSprintState.CLOSED]
-    active = [s for s in in_scope if s.state is JiraSprintState.ACTIVE]
+    team_active = [s for s in active if rx.search(s.name)]
 
     logger.info(
         "sprint_select.discovered",
@@ -90,14 +98,13 @@ async def run(ctx: RunContext) -> SprintSelection:
             "run_date": ctx.run_date_iso,
             "board_id": board_id,
             "pattern": pattern,
-            "total_sprints": len(sprints),
-            "in_scope": [s.id for s in in_scope],
-            "active_in_scope": [s.id for s in active],
+            "active_total": len(active),
+            "team_active": [s.id for s in team_active],
         },
     )
 
-    if len(active) == 1:
-        chosen = active[0]
+    if len(team_active) == 1:
+        chosen = team_active[0]
         return SprintSelection(
             state="auto",
             reason=f"single active in-scope sprint: {chosen.name}",
@@ -105,13 +112,14 @@ async def run(ctx: RunContext) -> SprintSelection:
             candidates=[_candidate_dict(chosen, ctx.run_date)],
         )
 
-    # Zero or several active matches — a human picks. Offer the in-scope set
-    # when non-empty, otherwise every non-closed sprint so they aren't stuck.
-    picker = in_scope or [s for s in sprints if s.state is not JiraSprintState.CLOSED]
+    # Zero or several active team sprints — a human decides which is current.
+    # Offer the team-scoped active set when non-empty, else every active sprint
+    # on the board so they can still pick one.
+    picker = team_active or active
     reason = (
         "no active sprint matches the team scope"
-        if not active
-        else f"{len(active)} active sprints match the team scope"
+        if not team_active
+        else f"{len(team_active)} active sprints match the team scope"
     )
     ctx.notes.append(f"sprint_select: {reason}; awaiting human decision")
     return SprintSelection(
