@@ -32,6 +32,7 @@ All inputs/outputs are Pydantic models; HTTP errors → typed ToolExceptions.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
@@ -45,6 +46,8 @@ from tl_agent.tools._http import http_client, raise_from_http_error, raise_from_
 from tl_agent.tools.base import BaseTool, RetryPolicy, ToolErrorKind, ToolException
 from tl_agent.tools.idempotency import make_key
 from tl_agent.tools.registry import registry
+
+logger = logging.getLogger(__name__)
 
 
 def _client() -> httpx.AsyncClient:
@@ -515,9 +518,17 @@ class ListSprintTool(BaseTool[ListSprintIn, ListSprintOut]):
         async with _client() as client:
             meta = await self._resolve_sprint(client, args)
             sprint_id = str(meta["id"])
-            issues = await _paginate(
-                client, f"/rest/agile/1.0/sprint/{sprint_id}/issue", "issues", self.name
-            )
+            endpoint = f"/rest/agile/1.0/sprint/{sprint_id}/issue"
+            issues = await _paginate(client, endpoint, "issues", self.name)
+        logger.info(
+            "list_sprint.tickets",
+            extra={
+                "sprint_id": sprint_id,
+                "sprint_name": meta.get("name"),
+                "endpoint": endpoint,
+                "tickets": len(issues),
+            },
+        )
         return ListSprintOut(
             sprint_id=sprint_id,
             start_date=_dt(meta["startDate"]) if meta.get("startDate") else None,
@@ -528,34 +539,111 @@ class ListSprintTool(BaseTool[ListSprintIn, ListSprintOut]):
     async def _resolve_sprint(
         self, client: httpx.AsyncClient, args: ListSprintIn
     ) -> dict[str, Any]:
-        """Resolve the sprint metadata dict (with id + start/end dates)."""
+        """Resolve the sprint metadata dict (with id + start/end dates).
+
+        Logs which Agile endpoint was queried and what came back so a
+        NOT_FOUND is diagnosable from the trace: by `sprint_id` it's a direct
+        GET; by `board_id` it lists the board's *active* sprints and takes the
+        first. An empty active list is the usual "list_sprint not found" cause.
+        """
         if args.sprint_id:
+            endpoint = f"/rest/agile/1.0/sprint/{args.sprint_id}"
             try:
-                r = await client.get(f"/rest/agile/1.0/sprint/{args.sprint_id}")
+                r = await client.get(endpoint)
                 r.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "list_sprint.resolve_failed",
+                    extra={
+                        "by": "sprint_id",
+                        "sprint_id": args.sprint_id,
+                        "endpoint": endpoint,
+                        "status": exc.response.status_code,
+                    },
+                )
                 raise_from_http_error(exc, tool_label=self.name)
             except httpx.HTTPError as exc:
+                logger.warning(
+                    "list_sprint.resolve_failed",
+                    extra={"by": "sprint_id", "sprint_id": args.sprint_id, "endpoint": endpoint},
+                )
                 raise_from_transport_error(exc, tool_label=self.name)
             meta: dict[str, Any] = r.json()
+            logger.info(
+                "list_sprint.resolved",
+                extra={
+                    "by": "sprint_id",
+                    "endpoint": endpoint,
+                    "sprint_id": str(meta.get("id")),
+                    "sprint_name": meta.get("name"),
+                    "state": meta.get("state"),
+                },
+            )
             return meta
         if args.board_id:
+            endpoint = f"/rest/agile/1.0/board/{args.board_id}/sprint"
             try:
-                r = await client.get(
-                    f"/rest/agile/1.0/board/{args.board_id}/sprint", params={"state": "active"}
-                )
+                r = await client.get(endpoint, params={"state": "active"})
                 r.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "list_sprint.resolve_failed",
+                    extra={
+                        "by": "board_id",
+                        "board_id": args.board_id,
+                        "endpoint": endpoint,
+                        "state": "active",
+                        "status": exc.response.status_code,
+                    },
+                )
                 raise_from_http_error(exc, tool_label=self.name)
             except httpx.HTTPError as exc:
+                logger.warning(
+                    "list_sprint.resolve_failed",
+                    extra={
+                        "by": "board_id",
+                        "board_id": args.board_id,
+                        "endpoint": endpoint,
+                        "state": "active",
+                    },
+                )
                 raise_from_transport_error(exc, tool_label=self.name)
             values: list[dict[str, Any]] = r.json().get("values") or []
             if not values:
+                logger.warning(
+                    "list_sprint.not_found",
+                    extra={
+                        "by": "board_id",
+                        "board_id": args.board_id,
+                        "endpoint": endpoint,
+                        "state": "active",
+                        "active_sprints": 0,
+                    },
+                )
                 raise ToolException(
                     kind=ToolErrorKind.NOT_FOUND,
-                    message=f"{self.name}: no active sprint on board {args.board_id}",
+                    message=(
+                        f"{self.name}: no active sprint on board {args.board_id} "
+                        f"(GET {endpoint}?state=active returned 0 sprints) — start a "
+                        f"sprint on the board or pass an explicit sprint_id"
+                    ),
                 )
-            return values[0]
+            chosen = values[0]
+            logger.info(
+                "list_sprint.resolved",
+                extra={
+                    "by": "board_id",
+                    "board_id": args.board_id,
+                    "endpoint": endpoint,
+                    "active_sprints": len(values),
+                    "sprint_id": str(chosen.get("id")),
+                    "sprint_name": chosen.get("name"),
+                },
+            )
+            return chosen
+        logger.warning(
+            "list_sprint.not_found", extra={"by": "none", "reason": "no sprint_id or board_id"}
+        )
         raise ToolException(
             kind=ToolErrorKind.VALIDATION,
             message=f"{self.name}: one of sprint_id or board_id is required",
