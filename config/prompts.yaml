@@ -12,4 +12,5 @@ versions:
   phase5_deepdive: 1
   phase6_response_mode: 2
   phase7_compose: 1
+  standup_segments: 1
   verifier: 1

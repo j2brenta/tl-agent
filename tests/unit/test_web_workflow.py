@@ -16,7 +16,14 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tl_agent.models import GitCommit, JiraStatus, JiraTicket
+from tl_agent.models import (
+    Engineer,
+    GitCommit,
+    JiraStatus,
+    JiraTicket,
+    StandupSegment,
+    StandupSegmentKind,
+)
 from tl_agent.storage import connect, initialize
 from tl_agent.web.routes import workflow as wf
 from tl_agent.web.routes.workflow import _collect_window, _milestones, _ticket_rows
@@ -284,3 +291,61 @@ def test_collect_route_renders_tickets_and_commits(
     assert "unassigned" in r.text
     assert "fix publisher retry" in r.text  # commit message line
     assert "abcdef12" in r.text  # short sha
+
+
+# -------------------- standup collect + parse --------------------
+
+
+def test_collect_standup_route_groups_segments_per_engineer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    john = Engineer(id="john", display_name="John Doe")
+
+    async def _fake_segments(
+        selected: str, since: datetime, until: datetime
+    ) -> tuple[list[dict[str, object]], str | None]:
+        segments = [
+            StandupSegment(
+                engineer_id="john",
+                date_iso="2026-05-22",
+                chat_message_id="m1",
+                chat_channel_id="town-square",
+                segment_index=0,
+                text="Working on ENG-12 today.",
+                kind=StandupSegmentKind.UPDATE,
+            ),
+            StandupSegment(
+                engineer_id="john",
+                date_iso="2026-05-22",
+                chat_message_id="m1",
+                chat_channel_id="town-square",
+                segment_index=1,
+                text="Also, check out this cool article on Rust!",
+                kind=StandupSegmentKind.OFF_TOPIC,
+            ),
+        ]
+        return [{"engineer": john, "segments": segments}], None
+
+    monkeypatch.setattr(wf, "_collect_standup_segments", _fake_segments)
+
+    r = client.post("/workflow/collect_standup", data={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert "John Doe" in r.text
+    assert "Working on ENG-12 today." in r.text
+    assert "Also, check out this cool article on Rust!" in r.text
+    assert "off-topic" in r.text.lower()
+
+
+def test_collect_standup_route_shows_chat_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_segments(
+        selected: str, since: datetime, until: datetime
+    ) -> tuple[list[dict[str, object]], str | None]:
+        return [], "channel not found"
+
+    monkeypatch.setattr(wf, "_collect_standup_segments", _fake_segments)
+
+    r = client.post("/workflow/collect_standup", data={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert "channel not found" in r.text

@@ -132,6 +132,32 @@ class StandupMessage(BaseModel):
     chat_channel_id: str | None = None
 
 
+class StandupSegmentKind(StrEnum):
+    """How one segment of a standup message was classified."""
+
+    UPDATE = "update"  # project-related: yesterday/today/blockers
+    OFF_TOPIC = "off_topic"  # banter, links, life updates — a mood signal
+
+
+class StandupSegment(BaseModel):
+    """One block of a standup message, classified by topic.
+
+    A single `StandupMessage.raw` may contain several of these — e.g. a
+    work update followed by an unrelated aside. `segment_index` preserves
+    the order they appeared in within the source message.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    engineer_id: str
+    date_iso: str  # YYYY-MM-DD
+    chat_message_id: str | None = None
+    chat_channel_id: str | None = None
+    segment_index: int = Field(ge=0)
+    text: str
+    kind: StandupSegmentKind
+
+
 # -------------------- aggregate --------------------
 
 
@@ -147,6 +173,7 @@ class DailySignals(BaseModel):
     run_date: str  # YYYY-MM-DD
     standups_today: list[StandupMessage] = Field(default_factory=list[StandupMessage])
     standups_yesterday: list[StandupMessage] = Field(default_factory=list[StandupMessage])
+    standup_segments: list[StandupSegment] = Field(default_factory=list[StandupSegment])
     sprint_tickets: list[JiraTicket] = Field(default_factory=list[JiraTicket])
     tickets_added_since_yesterday: list[JiraTicket] = Field(default_factory=list[JiraTicket])
     commits: list[GitCommit] = Field(default_factory=list[GitCommit])

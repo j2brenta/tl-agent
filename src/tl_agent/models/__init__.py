@@ -27,6 +27,8 @@ from tl_agent.models.signals import (
     JiraStatusChange,
     JiraTicket,
     StandupMessage,
+    StandupSegment,
+    StandupSegmentKind,
 )
 from tl_agent.models.triage import (
     EngineerTriage,
@@ -66,5 +68,7 @@ __all__ = [
     "Role",
     "StandupExtract",
     "StandupMessage",
+    "StandupSegment",
+    "StandupSegmentKind",
     "TriageStatus",
 ]

@@ -45,6 +45,13 @@ routes:
     temperature: 0.0
     cache_system: true
 
+  standup_segments:
+    provider: anthropic
+    model: claude-haiku-4-5
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: true
+
   phase3_correlate:
     provider: anthropic
     model: claude-sonnet-4-6

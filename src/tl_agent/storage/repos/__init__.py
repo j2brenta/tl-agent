@@ -8,6 +8,7 @@ from tl_agent.storage.repos import (
     predictions,
     resolved_config,
     snapshots,
+    standup_segments,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "predictions",
     "resolved_config",
     "snapshots",
+    "standup_segments",
 ]

@@ -123,11 +123,13 @@ async def jira_import(date: str | None = Form(None)) -> HTMLResponse:
 
 @app.post("/standup/import", response_class=HTMLResponse)
 async def standup_import(date: str | None = Form(None)) -> HTMLResponse:
-    """Pull today's standups from Mattermost and persist to standup_observations."""
+    """Pull today's standups from Mattermost, persist + segment them."""
     from datetime import UTC, datetime, timedelta
     from datetime import date as _date
 
-    from tl_agent.phases.phase1_collect import fetch_standups
+    from tl_agent.llm.router import build_default
+    from tl_agent.phases.phase1_collect import fetch_standup_messages
+    from tl_agent.phases.standup_parse import parse_segments
     from tl_agent.storage import connect, transaction
     from tl_agent.storage.markdown_loader import load_team
     from tl_agent.storage.repos import observations as obs_repo
@@ -140,24 +142,13 @@ async def standup_import(date: str | None = Form(None)) -> HTMLResponse:
             '<div id="standup-status" class="banner banner-warn">⚠ Invalid date.</div>'
         )
 
-    # Build a minimal context so fetch_standups can resolve engineer names.
     team = load_team()
-
-    class _MinCtx:
-        standup_channel_id = "town-square"
-        team = None
-
-        def __init__(self) -> None:
-            self.notes: list[str] = []
-
-    ctx = _MinCtx()
-    ctx.team = team  # type: ignore[assignment]
-
     since = datetime(run_date.year, run_date.month, run_date.day, 0, 0, tzinfo=UTC)
     until = since + timedelta(days=1)
+    notes: list[str] = []
 
     try:
-        messages = await fetch_standups(ctx, since=since, until=until)  # type: ignore[arg-type]
+        messages = await fetch_standup_messages(team, "town-square", since, until, notes)
     except Exception as exc:
         logger.warning("standup/import failed: %s", exc)
         banner = '<div id="standup-status" class="banner banner-warn">'
@@ -173,17 +164,24 @@ async def standup_import(date: str | None = Form(None)) -> HTMLResponse:
     from tl_agent.settings import get_settings
 
     conn = connect(get_settings().sqlite_path)
-    with transaction(conn):
-        for msg in messages:
-            obs_repo.upsert(
-                conn,
-                obs_id=f"{run_date_iso}:{msg.engineer_id}",
-                run_date=run_date,
-                engineer_id=msg.engineer_id,
-                raw=msg.raw,
-                summary=None,
-                chat_message_id=msg.chat_message_id,
-            )
+    try:
+        with transaction(conn):
+            for msg in messages:
+                obs_repo.upsert(
+                    conn,
+                    obs_id=f"{run_date_iso}:{msg.engineer_id}",
+                    run_date=run_date,
+                    engineer_id=msg.engineer_id,
+                    raw=msg.raw,
+                    summary=None,
+                    chat_message_id=msg.chat_message_id,
+                )
+        # Segment + classify (update vs off-topic/mood). Cached by
+        # (chat_message_id, engineer_id, segment_index) — reused as-is by
+        # the Workflow "Collect Standup" button and by a pipeline run.
+        await parse_segments(conn, build_default(), messages, notes=notes)
+    finally:
+        conn.close()
 
     response = HTMLResponse(
         f'<div id="standup-status" class="banner banner-ok">'

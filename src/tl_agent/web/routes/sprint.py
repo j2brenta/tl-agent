@@ -21,6 +21,7 @@ from tl_agent.storage.markdown_loader import load_team
 from tl_agent.storage.repos import flags as flags_repo
 from tl_agent.storage.repos import observations as obs_repo
 from tl_agent.storage.repos import snapshots as snapshots_repo
+from tl_agent.storage.repos import standup_segments as segments_repo
 
 router = APIRouter()
 
@@ -93,6 +94,9 @@ async def sprint(date: str | None = None) -> HTMLResponse:
         eng_tickets = [t for t in tickets if t.assignee == eng.id]
         eng_flags = flags_by_eng.get(eng.id, [])
         observation = obs_repo.get(conn, run_date=run_date, engineer_id=eng.id)
+        segments = segments_repo.list_for_engineer_date(
+            conn, engineer_id=eng.id, date_iso=run_date.isoformat()
+        )
 
         blocked = [t for t in eng_tickets if t.status == JiraStatus.BLOCKED]
         done = [t for t in eng_tickets if t.status == JiraStatus.DONE]
@@ -106,6 +110,7 @@ async def sprint(date: str | None = None) -> HTMLResponse:
                 "tickets": eng_tickets,
                 "flags": eng_flags,
                 "observation": observation,
+                "segments": segments,
                 "on_track": on_track,
                 "blocked_count": len(blocked),
                 "done_count": len(done),

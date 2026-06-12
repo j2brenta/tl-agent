@@ -22,10 +22,20 @@ from tl_agent.models import (
     PredictionOutcome,
     ResponseMode,
     Role,
+    StandupSegment,
+    StandupSegmentKind,
     TriageStatus,
 )
 from tl_agent.storage import connect, initialize, load_team, transaction
-from tl_agent.storage.repos import baselines, decisions, flags, observations, predictions, snapshots
+from tl_agent.storage.repos import (
+    baselines,
+    decisions,
+    flags,
+    observations,
+    predictions,
+    snapshots,
+    standup_segments,
+)
 from tl_agent.storage.repos.baselines import Baseline
 from tl_agent.storage.working_context import WorkingContext
 
@@ -170,6 +180,100 @@ def test_observations_upsert_updates_in_place(db: sqlite3.Connection) -> None:
     # FTS should reflect the update, not return both versions.
     hits = observations.search(db, query="updated")
     assert len(hits) == 1
+
+
+# -------------------- standup segments --------------------
+
+
+def test_standup_segments_round_trip_and_get_for_message(db: sqlite3.Connection) -> None:
+    segs = [
+        StandupSegment(
+            engineer_id="john",
+            date_iso="2026-05-22",
+            chat_message_id="m1",
+            chat_channel_id="town-square",
+            segment_index=0,
+            text="Working on ENG-12 today.",
+            kind=StandupSegmentKind.UPDATE,
+        ),
+        StandupSegment(
+            engineer_id="john",
+            date_iso="2026-05-22",
+            chat_message_id="m1",
+            chat_channel_id="town-square",
+            segment_index=1,
+            text="Also, check out this cool article on Rust!",
+            kind=StandupSegmentKind.OFF_TOPIC,
+        ),
+    ]
+    with transaction(db):
+        standup_segments.upsert_many(db, segs)
+
+    got = standup_segments.get_for_message(db, chat_message_id="m1", engineer_id="john")
+    assert got == segs
+
+    # A message no one has parsed yet returns the empty-list cache miss.
+    assert standup_segments.get_for_message(db, chat_message_id="m2", engineer_id="john") == []
+
+
+def test_standup_segments_upsert_updates_in_place(db: sqlite3.Connection) -> None:
+    original = StandupSegment(
+        engineer_id="matt",
+        date_iso="2026-05-22",
+        chat_message_id="m9",
+        chat_channel_id="town-square",
+        segment_index=0,
+        text="initial text",
+        kind=StandupSegmentKind.UPDATE,
+    )
+    updated = original.model_copy(
+        update={"text": "revised text", "kind": StandupSegmentKind.OFF_TOPIC}
+    )
+
+    with transaction(db):
+        standup_segments.upsert_many(db, [original])
+        standup_segments.upsert_many(db, [updated])
+
+    got = standup_segments.get_for_message(db, chat_message_id="m9", engineer_id="matt")
+    assert got == [updated]
+
+
+def test_standup_segments_list_for_engineer_date(db: sqlite3.Connection) -> None:
+    segs = [
+        StandupSegment(
+            engineer_id="alicia",
+            date_iso="2026-05-22",
+            chat_message_id="m1",
+            chat_channel_id="town-square",
+            segment_index=0,
+            text="Yesterday I finished ENG-20.",
+            kind=StandupSegmentKind.UPDATE,
+        ),
+        StandupSegment(
+            engineer_id="alicia",
+            date_iso="2026-05-22",
+            chat_message_id="m1",
+            chat_channel_id="town-square",
+            segment_index=1,
+            text="Found a fun blog post about Rust async.",
+            kind=StandupSegmentKind.OFF_TOPIC,
+        ),
+        StandupSegment(
+            engineer_id="alicia",
+            date_iso="2026-05-21",
+            chat_message_id="m0",
+            chat_channel_id="town-square",
+            segment_index=0,
+            text="yesterday's standup",
+            kind=StandupSegmentKind.UPDATE,
+        ),
+    ]
+    with transaction(db):
+        standup_segments.upsert_many(db, segs)
+
+    today = standup_segments.list_for_engineer_date(db, engineer_id="alicia", date_iso="2026-05-22")
+    assert [s.segment_index for s in today] == [0, 1]
+    assert today[1].kind is StandupSegmentKind.OFF_TOPIC
 
 
 # -------------------- baselines --------------------

@@ -41,6 +41,13 @@ routes:
     temperature: 0.0
     cache_system: false
 
+  standup_segments:
+    provider: ollama
+    model: qwen3:8b
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: false
+
   phase3_correlate:
     provider: ollama
     model: qwen3:8b

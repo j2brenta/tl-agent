@@ -143,7 +143,7 @@
           <button type="button"
                   style="font-size:10px;padding:1px 7px;border-radius:99px;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);cursor:pointer"
                   onclick="var p=this.closest('[data-standup]').querySelector('.standup-raw');var shown=p.style.display!=='none';p.style.display=shown?'none':'block';this.textContent=shown?'show':'hide'">
-            hide
+            {{ 'hide' if row.segments else 'show raw' }}
           </button>
         {% endif %}
       </div>
@@ -153,8 +153,21 @@
             "{{ row.observation.summary }}"
           </div>
         {% endif %}
+        {% if row.segments %}
+          <div style="display:flex;flex-direction:column;gap:6px">
+            {% for seg in row.segments %}
+            <div style="font-size:12px;line-height:1.5;padding:6px 8px;border-radius:var(--radius-sm);
+                        {% if seg.kind.value == 'off_topic' %}background:var(--purple-bg);border:1px solid var(--purple){% else %}background:var(--bg);border:1px solid var(--border){% endif %}">
+              {% if seg.kind.value == 'off_topic' %}
+                <span class="badge badge-purple" style="font-size:10px;margin-bottom:4px;display:inline-block">off-topic · mood</span><br>
+              {% endif %}
+              {{ seg.text }}
+            </div>
+            {% endfor %}
+          </div>
+        {% endif %}
         <pre class="standup-raw"
-             style="font-size:11px;white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);line-height:1.5;max-height:180px;overflow-y:auto">{{ row.observation.raw }}</pre>
+             style="font-size:11px;white-space:pre-wrap;margin-top:4px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);line-height:1.5;max-height:180px;overflow-y:auto;{% if row.segments %}display:none{% endif %}">{{ row.observation.raw }}</pre>
       {% else %}
         <div style="font-size:12px;color:var(--text-faint);font-style:italic">no standup recorded</div>
       {% endif %}

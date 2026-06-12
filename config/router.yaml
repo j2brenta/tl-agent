@@ -45,6 +45,17 @@ routes:
     temperature: 0.0
     cache_system: true
 
+  # Per-message standup segmentation + update/off-topic classification.
+  # Cheap tier: narrow, parallel, one short call per standup message — and
+  # cached by (chat_message_id, engineer_id, segment_index), so most calls
+  # only ever happen once.
+  standup_segments:
+    provider: anthropic
+    model: claude-haiku-4-5
+    max_tokens: 512
+    temperature: 0.0
+    cache_system: true
+
   phase3_correlate:
     provider: anthropic
     model: claude-sonnet-4-6

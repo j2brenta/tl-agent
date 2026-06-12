@@ -1,0 +1,39 @@
+{# HTMX fragment: one-shot pull + segmentation of today's standup messages. #}
+
+<div class="card">
+  <div class="section-label">
+    Standup — parsed
+    <span style="color:var(--text-faint);font-weight:400">
+      · {{ groups | length }} {{ "person" if groups | length == 1 else "people" }}
+    </span>
+    <span style="color:var(--text-faint);font-weight:400;font-size:11px">
+      (<time datetime="{{ since }}">{{ since[:16].replace('T',' ') }}</time> →
+       <time datetime="{{ until }}">{{ until[:16].replace('T',' ') }}</time> UTC)
+    </span>
+  </div>
+
+  {% if chat_err %}
+  <div class="banner banner-warn"><span>⚠</span><span>Mattermost fetch failed: {{ chat_err }}</span></div>
+  {% elif not groups %}
+  <div style="font-size:13px;color:var(--text-muted)">No standup messages in this window.</div>
+  {% else %}
+  <div style="display:flex;flex-direction:column;gap:14px">
+    {% for group in groups %}
+    <div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">{{ group.engineer.display_name }}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        {% for seg in group.segments %}
+        <div style="font-size:12px;line-height:1.5;padding:6px 8px;border-radius:var(--radius-sm);
+                    {% if seg.kind.value == 'off_topic' %}background:var(--purple-bg);border:1px solid var(--purple){% else %}background:var(--bg);border:1px solid var(--border){% endif %}">
+          {% if seg.kind.value == 'off_topic' %}
+            <span class="badge badge-purple" style="font-size:10px;margin-bottom:4px;display:inline-block">off-topic · mood</span><br>
+          {% endif %}
+          {{ seg.text }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

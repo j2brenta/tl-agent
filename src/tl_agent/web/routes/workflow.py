@@ -328,6 +328,44 @@ async def _collect_gitlab(
     return commits, "; ".join(notes) or None
 
 
+async def _collect_standup_segments(
+    selected: str, since: datetime, until: datetime
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Fetch + segment today's standup messages, grouped per engineer.
+
+    Returns (groups, error) where each group is
+    `{"engineer": Engineer, "segments": list[StandupSegment]}`.
+    Segments are cached by `(chat_message_id, engineer_id, segment_index)` —
+    reused by this button, the Sprint page's "Import from Mattermost", and
+    the main pipeline run alike.
+    """
+    from tl_agent.llm.router import build_default
+    from tl_agent.phases.phase1_collect import fetch_standup_messages
+    from tl_agent.phases.standup_parse import parse_segments
+    from tl_agent.storage import load_team
+
+    team = load_team()
+    notes: list[str] = []
+    messages = await fetch_standup_messages(team, "town-square", since, until, notes)
+
+    conn = _conn()
+    try:
+        segments = await parse_segments(conn, build_default(), messages, notes=notes)
+    finally:
+        conn.close()
+
+    by_engineer: dict[str, list[Any]] = {}
+    for seg in segments:
+        by_engineer.setdefault(seg.engineer_id, []).append(seg)
+
+    groups = [
+        {"engineer": e, "segments": by_engineer[e.id]}
+        for e in team.engineers
+        if e.id in by_engineer
+    ]
+    return groups, "; ".join(notes) or None
+
+
 def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
     """Annotate each ticket with assignment health for the table.
 
@@ -376,5 +414,31 @@ async def workflow_collect(date: str | None = Form(None)) -> HTMLResponse:
             commits=sorted(commits, key=lambda c: c.committed_at, reverse=True),
             jira_err=jira_err,
             gitlab_err=gitlab_err,
+        )
+    )
+
+
+@router.post("/workflow/collect_standup", response_class=HTMLResponse)
+async def workflow_collect_standup(date: str | None = Form(None)) -> HTMLResponse:
+    """One-shot pull of today's standup messages, segmented + classified.
+
+    `update` segments are project-related; `off_topic` segments are banter,
+    links, life updates — flagged for a future team-mood signal. Results are
+    cached by `(chat_message_id, engineer_id, segment_index)`, so a later
+    "Run now" for the same date reuses these segments at zero extra LLM cost.
+    """
+    selected = _coerce_date(date)
+    since, until = _collect_window(selected)
+
+    groups, chat_err = await _collect_standup_segments(selected, since, until)
+
+    template = _env.get_template("_workflow_standup.html")
+    return HTMLResponse(
+        template.render(
+            selected_date=selected,
+            since=since.isoformat(),
+            until=until.isoformat(),
+            groups=groups,
+            chat_err=chat_err,
         )
     )

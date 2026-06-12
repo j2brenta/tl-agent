@@ -27,6 +27,7 @@ from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
 from tl_agent.phases._sprint import sprint_progress
 from tl_agent.phases.sprint_select import resolve_board_id
+from tl_agent.phases.standup_parse import parse_segments
 from tl_agent.storage import TeamConfig
 from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects
 from tl_agent.tools import ToolResult
@@ -57,6 +58,14 @@ async def run(ctx: RunContext) -> DailySignals:
         sprint_task, commits_task, standups_today_task, standups_yesterday_task
     )
 
+    # Segment + classify today's standups (update vs off-topic/mood). Cached
+    # by (chat_message_id, engineer_id, segment_index) — messages already
+    # parsed via the Workflow "Collect Standup" button or the Sprint page's
+    # "Import from Mattermost" are reused here at zero extra LLM cost.
+    segments = await parse_segments(
+        ctx.sqlite, ctx.router, st_today, notes=ctx.notes, budget=ctx.budget
+    )
+
     sprint_day, sprint_length, sprint_tickets, added_since = sprint
     # Per-source counts; lets a 0 anywhere be diagnosed without re-running.
     logger.info(
@@ -73,6 +82,7 @@ async def run(ctx: RunContext) -> DailySignals:
             "commits": len(commits),
             "standups_today": len(st_today),
             "standups_yesterday": len(st_yesterday),
+            "standup_segments": len(segments),
             "gitlab_groups": list(ctx.team.gitlab_groups),
             "gitlab_projects": sorted({c.project for c in commits}),
             "standup_channel_id": ctx.standup_channel_id,
@@ -83,6 +93,7 @@ async def run(ctx: RunContext) -> DailySignals:
         run_date=ctx.run_date_iso,
         standups_today=st_today,
         standups_yesterday=st_yesterday,
+        standup_segments=segments,
         sprint_tickets=sprint_tickets,
         tickets_added_since_yesterday=added_since,
         commits=commits,
@@ -217,17 +228,33 @@ async def fetch_standups(
     ctx: RunContext, *, since: datetime, until: datetime
 ) -> list[StandupMessage]:
     """Pull chat history and map messages → StandupMessage by author."""
+    return await fetch_standup_messages(ctx.team, ctx.standup_channel_id, since, until, ctx.notes)
+
+
+async def fetch_standup_messages(
+    team: TeamConfig,
+    channel_id: str,
+    since: datetime,
+    until: datetime,
+    notes: list[str],
+) -> list[StandupMessage]:
+    """Pull chat history and map messages → StandupMessage by author.
+
+    Standalone (no `RunContext`) so one-shot web routes — Workflow's
+    "Collect Standup" and the Sprint page's "Import from Mattermost" — can
+    call it without constructing a full pipeline context.
+    """
     try:
         provider = get_chat_provider()
         msgs = await provider.get_messages(
-            channel_id=ctx.standup_channel_id, since=since, until=until, limit=200
+            channel_id=channel_id, since=since, until=until, limit=200
         )
     except Exception as exc:
-        ctx.notes.append(f"phase1: chat get_messages failed: {exc}")
+        notes.append(f"phase1: chat get_messages failed: {exc}")
         return []
     out: list[StandupMessage] = []
     for m in msgs:
-        engineer = next((e for e in ctx.team.engineers if e.matches(m.user_id)), None)
+        engineer = next((e for e in team.engineers if e.matches(m.user_id)), None)
         if engineer is not None:
             out.append(
                 StandupMessage(
@@ -243,7 +270,7 @@ async def fetch_standups(
         # message — split on `<Name>:` headers and emit one StandupMessage per
         # matched engineer. Same chat_message_id so the trace points back to
         # the same post.
-        for eid, body in _split_bulk_standup(m.text, ctx.team.engineers):
+        for eid, body in _split_bulk_standup(m.text, team.engineers):
             out.append(
                 StandupMessage(
                     engineer_id=eid,

@@ -32,6 +32,8 @@ from tl_agent.models import (
     ResponseMode,
     Role,
     StandupMessage,
+    StandupSegment,
+    StandupSegmentKind,
     TriageStatus,
 )
 
@@ -185,3 +187,41 @@ def test_daily_signals_aggregate() -> None:
     assert sig.sprint_day == 4
     assert sig.standups_today[0].engineer_id == "john"
     assert sig.commits[0].linked_ticket_keys == ("ENG-12",)
+    assert sig.standup_segments == []  # default — not yet segmented
+
+
+def test_standup_segment_kinds() -> None:
+    update = StandupSegment(
+        engineer_id="john",
+        date_iso="2026-05-22",
+        chat_message_id="m1",
+        chat_channel_id="town-square",
+        segment_index=0,
+        text="Working on ENG-12 today.",
+        kind=StandupSegmentKind.UPDATE,
+    )
+    off_topic = StandupSegment(
+        engineer_id="john",
+        date_iso="2026-05-22",
+        chat_message_id="m1",
+        chat_channel_id="town-square",
+        segment_index=1,
+        text="Also, check out this cool article on Rust!",
+        kind=StandupSegmentKind.OFF_TOPIC,
+    )
+    assert update.kind == "update"
+    assert off_topic.kind == "off_topic"
+
+
+def test_standup_segment_rejects_unknown_field() -> None:
+    with pytest.raises(ValidationError):
+        StandupSegment.model_validate(
+            {
+                "engineer_id": "john",
+                "date_iso": "2026-05-22",
+                "segment_index": 0,
+                "text": "hi",
+                "kind": "update",
+                "mood_score": 5,
+            }
+        )

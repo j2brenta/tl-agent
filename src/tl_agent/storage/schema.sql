@@ -110,6 +110,26 @@ BEGIN
     VALUES (new.rowid, new.raw, new.summary, new.engineer_id, new.run_date);
 END;
 
+-- ---------- standup_segments ----------
+-- Per-message segments classified as project `update` vs `off_topic`
+-- (banter, links, life updates — a team-mood signal). UNIQUE on
+-- (chat_message_id, engineer_id, segment_index) is the cache key: once a
+-- message has been parsed by the LLM, neither the "Collect Standup" button
+-- nor a pipeline run re-parses it.
+CREATE TABLE IF NOT EXISTS standup_segments (
+    id              TEXT PRIMARY KEY,
+    chat_message_id TEXT NOT NULL,
+    chat_channel_id TEXT,
+    engineer_id     TEXT NOT NULL,
+    date_iso        TEXT NOT NULL,
+    segment_index   INTEGER NOT NULL,
+    text            TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    UNIQUE (chat_message_id, engineer_id, segment_index)
+);
+CREATE INDEX IF NOT EXISTS standup_segments_by_date ON standup_segments(date_iso);
+CREATE INDEX IF NOT EXISTS standup_segments_by_eng  ON standup_segments(engineer_id, date_iso);
+
 -- ---------- engineer_baselines ----------
 -- Rolling stats per engineer per metric per window. Phase 2 compares today
 -- against the baseline.
