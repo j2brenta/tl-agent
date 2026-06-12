@@ -106,6 +106,7 @@ class GitCommit(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     sha: str = Field(min_length=7)
+    project: str = Field(min_length=1, description="GitLab project path_with_namespace.")
     author: str
     committed_at: datetime
     branch: str | None = None

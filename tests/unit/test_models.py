@@ -171,6 +171,7 @@ def test_daily_signals_aggregate() -> None:
         commits=[
             GitCommit(
                 sha="abc1234",
+                project="tl-agent/demo",
                 author="john",
                 committed_at=_now(),
                 message="ENG-12 wip",

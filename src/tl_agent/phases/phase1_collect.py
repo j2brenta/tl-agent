@@ -27,9 +27,11 @@ from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
 from tl_agent.phases._sprint import sprint_progress
 from tl_agent.phases.sprint_select import resolve_board_id
+from tl_agent.storage import TeamConfig
+from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects
 from tl_agent.tools import ToolResult
 from tl_agent.tools.chat.factory import get_chat_provider
-from tl_agent.tools.gitlab import ListCommitsTool
+from tl_agent.tools.gitlab import ListCommitsTool, ListGroupProjectsTool
 from tl_agent.tools.jira import ListSprintTool
 
 logger = logging.getLogger(__name__)
@@ -71,7 +73,8 @@ async def run(ctx: RunContext) -> DailySignals:
             "commits": len(commits),
             "standups_today": len(st_today),
             "standups_yesterday": len(st_yesterday),
-            "project": ctx.project,
+            "gitlab_groups": list(ctx.team.gitlab_groups),
+            "gitlab_projects": sorted({c.project for c in commits}),
             "standup_channel_id": ctx.standup_channel_id,
             "notes": list(ctx.notes),
         },
@@ -136,16 +139,78 @@ def _resolve_people(ticket: JiraTicket, ctx: RunContext) -> JiraTicket:
     return ticket.model_copy(update={"assignee": assignee, "reporter": reporter})
 
 
+async def _discover_projects(team: TeamConfig, run_date_iso: str, notes: list[str]) -> list[str]:
+    """Resolve the team's GitLab projects: every project under each configured group.
+
+    Falls back to `config/gitlab_projects.yaml` when `team.gitlab_groups` is
+    empty, or when a group's discovery call fails.
+    """
+    if not team.gitlab_groups:
+        return sorted(load_allowed_gitlab_projects())
+
+    tool = ListGroupProjectsTool()
+
+    async def _one(group: str) -> list[str]:
+        result = await tool.invoke({"group": group}, run_date_iso=run_date_iso)
+        if not isinstance(result, ToolResult):
+            notes.append(f"phase1: gitlab project discovery failed for group {group!r}")
+            return []
+        return list(result.value.projects)
+
+    results = await asyncio.gather(*(_one(g) for g in team.gitlab_groups))
+    projects = sorted({p for batch in results for p in batch})
+    if not projects:
+        notes.append("phase1: no GitLab projects discovered; falling back to gitlab_projects.yaml")
+        return sorted(load_allowed_gitlab_projects())
+    return projects
+
+
 async def _fetch_commits(ctx: RunContext, since: datetime, until: datetime) -> list[GitCommit]:
+    return await fetch_commits(ctx.team, since, until, ctx.run_date_iso, ctx.notes)
+
+
+async def fetch_commits(
+    team: TeamConfig,
+    since: datetime,
+    until: datetime,
+    run_date_iso: str,
+    notes: list[str],
+) -> list[GitCommit]:
+    """Pull each engineer's commits across every GitLab project the team owns.
+
+    Queried by engineer (`author=gitlab_username`) rather than by a single
+    configured project, so commits land regardless of which of the team's
+    repos they were pushed to. Projects come from `list_group_projects` for
+    each group in `team.gitlab_groups` (config/team.md → Repo scope);
+    `config/gitlab_projects.yaml` is the fallback when no group is configured.
+    """
+    projects = await _discover_projects(team, run_date_iso, notes)
+    engineers = [e for e in team.engineers if e.gitlab_username]
     tool = ListCommitsTool()
-    result = await tool.invoke(
-        {"project": ctx.project, "since": since.isoformat(), "until": until.isoformat()},
-        run_date_iso=ctx.run_date_iso,
-    )
-    if not isinstance(result, ToolResult):
-        ctx.notes.append(f"phase1: gitlab commits fetch failed ({result.kind.value})")
-        return []
-    return list(result.value.commits)
+
+    async def _one(project: str, engineer: Engineer) -> list[GitCommit]:
+        result = await tool.invoke(
+            {
+                "project": project,
+                "since": since.isoformat(),
+                "until": until.isoformat(),
+                "author": engineer.gitlab_username,
+            },
+            run_date_iso=run_date_iso,
+        )
+        if not isinstance(result, ToolResult):
+            notes.append(
+                f"phase1: gitlab commits fetch failed for {project}/{engineer.id} "
+                f"({result.kind.value})"
+            )
+            return []
+        return list(result.value.commits)
+
+    results = await asyncio.gather(*(_one(p, e) for p in projects for e in engineers))
+    commits: list[GitCommit] = []
+    for r in results:
+        commits.extend(r)
+    return commits
 
 
 async def fetch_standups(

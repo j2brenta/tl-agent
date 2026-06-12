@@ -62,6 +62,7 @@
     {% for c in commits %}
     <div style="display:flex;align-items:baseline;gap:10px;font-size:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
       <span style="font-family:var(--mono);color:var(--text-faint)">{{ c.sha[:8] }}</span>
+      <span style="font-family:var(--mono);color:var(--text-faint);white-space:nowrap">{{ c.project }}</span>
       <span style="font-weight:500;min-width:60px">{{ c.author }}</span>
       <span style="flex:1">{{ c.message.splitlines()[0] if c.message else "" }}
         {% if c.linked_ticket_keys %}<span style="color:var(--text-faint);font-family:var(--mono)">[{{ c.linked_ticket_keys | join(', ') }}]</span>{% endif %}

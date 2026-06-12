@@ -29,6 +29,19 @@ a human decision on the Workflow tab.
 
 ---
 
+## Repo scope
+
+Reserved (non-person) section. Defines the GitLab group(s) whose projects
+"belong to the team" — `list_group_projects` discovers every project under
+each one (including subgroups), so Phase 1 pulls each engineer's commits from
+any team repo without a hand-maintained per-project allowlist. Comma-separate
+multiple groups (e.g. `tl-agent, tl-agent-mobile`). `config/gitlab_projects.yaml`
+is the fallback when `gitlab_groups` is unset.
+
+- **gitlab_groups:** tl-agent
+
+---
+
 ## Kirill
 
 - **id:** kirill

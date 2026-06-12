@@ -25,16 +25,26 @@ from tl_agent.tools.base import BaseTool
 from tl_agent.tools.registry import registry
 
 
-def _encode_project(value: str) -> str:
-    # GitLab REST requires namespaced paths to be URL-encoded in the path segment:
-    # `tl-agent/demo` must become `tl-agent%2Fdemo`, otherwise GitLab parses
-    # `tl-agent` as the id and returns 404 on every /repository/* sub-resource.
+def _encode_path(value: str) -> str:
+    # GitLab REST requires namespaced project/group paths to be URL-encoded in
+    # the path segment: `tl-agent/demo` must become `tl-agent%2Fdemo`,
+    # otherwise GitLab parses `tl-agent` as the id and 404s on sub-resources.
     return quote(value, safe="")
 
 
 def _validate_project(value: str) -> str:
     # Local import to avoid a circular dependency through settings/storage.
-    from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects
+    from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects, load_team
+
+    groups = load_team().gitlab_groups
+    if groups:
+        if any(value == g or value.startswith(f"{g}/") for g in groups):
+            return value
+        raise ValueError(
+            f"unknown project {value!r}. It is outside the team's GitLab groups "
+            f"{list(groups)!r} (config/team.md → Repo scope). Use a project "
+            "discovered via list_group_projects, not a guess."
+        )
 
     allowed = load_allowed_gitlab_projects()
     if value not in allowed:
@@ -59,6 +69,33 @@ def _client() -> httpx.AsyncClient:
 
 def _parse_ticket_keys(text: str) -> tuple[str, ...]:
     return tuple(sorted(set(_TICKET_RE.findall(text))))
+
+
+async def _paginate_pages(
+    client: httpx.AsyncClient,
+    path: str,
+    params: dict[str, Any],
+    tool_label: str,
+    *,
+    per_page: int = 100,
+) -> list[dict[str, Any]]:
+    """Walk a `page`/`per_page` GitLab list endpoint until a short page ends it."""
+    items: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        try:
+            r = await client.get(path, params={**params, "per_page": per_page, "page": page})
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise_from_http_error(exc, tool_label=tool_label)
+        except httpx.HTTPError as exc:
+            raise_from_transport_error(exc, tool_label=tool_label)
+        batch: list[dict[str, Any]] = r.json()
+        items.extend(batch)
+        if len(batch) < per_page:
+            break
+        page += 1
+    return items
 
 
 # -------------------- list_commits --------------------
@@ -102,7 +139,7 @@ class ListCommitsTool(BaseTool[ListCommitsIn, ListCommitsOut]):
         }
         if args.author:
             params["author"] = args.author
-        path = f"/api/v4/projects/{_encode_project(args.project)}/repository/commits"
+        path = f"/api/v4/projects/{_encode_path(args.project)}/repository/commits"
         async with _client() as client:
             try:
                 r = await client.get(path, params=params)
@@ -112,15 +149,16 @@ class ListCommitsTool(BaseTool[ListCommitsIn, ListCommitsOut]):
             except httpx.HTTPError as exc:
                 raise_from_transport_error(exc, tool_label=self.name)
         data = r.json()
-        commits = [_to_commit(item) for item in data]
+        commits = [_to_commit(item, project=args.project) for item in data]
         return ListCommitsOut(commits=commits)
 
 
-def _to_commit(item: dict[str, Any]) -> GitCommit:
+def _to_commit(item: dict[str, Any], *, project: str) -> GitCommit:
     stats: dict[str, Any] = item.get("stats") or {}
     message = str(item.get("message", ""))
     return GitCommit(
         sha=str(item["id"])[:40],
+        project=project,
         author=str(item.get("author_email") or item.get("author_name") or "unknown"),
         committed_at=datetime.fromisoformat(str(item["committed_date"]).replace("Z", "+00:00")),
         branch=str(item.get("branch") or "") or None,
@@ -169,9 +207,7 @@ class GetCommitDiffTool(BaseTool[GetDiffIn, GetDiffOut]):
     output_model: ClassVar[type[BaseModel]] = GetDiffOut
 
     async def _call(self, args: GetDiffIn) -> GetDiffOut:
-        path = (
-            f"/api/v4/projects/{_encode_project(args.project)}/repository/commits/{args.sha}/diff"
-        )
+        path = f"/api/v4/projects/{_encode_path(args.project)}/repository/commits/{args.sha}/diff"
         async with _client() as client:
             try:
                 r = await client.get(path)
@@ -228,7 +264,7 @@ class ListBranchesTool(BaseTool[ListBranchesIn, ListBranchesOut]):
     output_model: ClassVar[type[BaseModel]] = ListBranchesOut
 
     async def _call(self, args: ListBranchesIn) -> ListBranchesOut:
-        path = f"/api/v4/projects/{_encode_project(args.project)}/repository/branches"
+        path = f"/api/v4/projects/{_encode_path(args.project)}/repository/branches"
         async with _client() as client:
             try:
                 r = await client.get(path)
@@ -255,6 +291,40 @@ class ListBranchesTool(BaseTool[ListBranchesIn, ListBranchesOut]):
         )
 
 
+# -------------------- list_group_projects --------------------
+
+
+class ListGroupProjectsIn(BaseModel):
+    group: str = Field(
+        min_length=1,
+        description="GitLab group path or id (e.g. 'tl-agent'). Subgroups are included.",
+    )
+
+
+class ListGroupProjectsOut(BaseModel):
+    group: str
+    projects: list[str] = Field(default_factory=list[str])
+
+
+class ListGroupProjectsTool(BaseTool[ListGroupProjectsIn, ListGroupProjectsOut]):
+    name: ClassVar[str] = "list_group_projects"
+    description: ClassVar[str] = (
+        "List every project (path_with_namespace) under a GitLab group, "
+        "including subgroups. Use this to discover the team's repos instead "
+        "of guessing project paths."
+    )
+    input_model: ClassVar[type[BaseModel]] = ListGroupProjectsIn
+    output_model: ClassVar[type[BaseModel]] = ListGroupProjectsOut
+
+    async def _call(self, args: ListGroupProjectsIn) -> ListGroupProjectsOut:
+        path = f"/api/v4/groups/{_encode_path(args.group)}/projects"
+        params = {"include_subgroups": "true", "simple": "true"}
+        async with _client() as client:
+            data = await _paginate_pages(client, path, params, self.name)
+        projects = [str(p["path_with_namespace"]) for p in data]
+        return ListGroupProjectsOut(group=args.group, projects=projects)
+
+
 # -------------------- register --------------------
 
 
@@ -264,6 +334,6 @@ def register_gitlab_tools() -> None:
 
     from tl_agent.tools.registry import RegistryError
 
-    for tool_cls in (ListCommitsTool, GetCommitDiffTool, ListBranchesTool):
+    for tool_cls in (ListCommitsTool, GetCommitDiffTool, ListBranchesTool, ListGroupProjectsTool):
         with contextlib.suppress(RegistryError):
             registry.register(tool_cls())

@@ -262,6 +262,7 @@ def test_collect_route_renders_tickets_and_commits(
     ) -> tuple[list[GitCommit], str | None]:
         commit = GitCommit(
             sha="abcdef1234567",
+            project="tl-agent/demo",
             author="john",
             committed_at=datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
             message="fix publisher retry [ENG-1]",

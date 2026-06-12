@@ -22,6 +22,7 @@ from tl_agent.tools.gitlab import (
     GetCommitDiffTool,
     ListBranchesTool,
     ListCommitsTool,
+    ListGroupProjectsTool,
     _parse_ticket_keys,
     register_gitlab_tools,
 )
@@ -58,6 +59,7 @@ def test_register_all_tools_no_collisions() -> None:
     names = sorted(t.name for t in registry.all())
     assert "get_ticket" in names
     assert "list_commits" in names
+    assert "list_group_projects" in names
     assert "search_standup_history" in names
     assert "post_jira_comment" in names
     assert "list_sprints" in names
@@ -385,6 +387,7 @@ async def test_list_commits(httpx_mock: HTTPXMock) -> None:
     c = result.value.commits[0]
     assert c.linked_ticket_keys == ("ENG-12",)
     assert c.insertions == 42
+    assert c.project == "tl-agent/demo"
 
 
 async def test_get_commit_diff(httpx_mock: HTTPXMock) -> None:
@@ -422,6 +425,25 @@ async def test_list_branches(httpx_mock: HTTPXMock) -> None:
     )
     assert isinstance(result, ToolResult)
     assert result.value.branches[0].name == "main"
+
+
+async def test_list_group_projects(httpx_mock: HTTPXMock) -> None:
+    """Paginates `page`/`per_page` until a short page ends it."""
+    full_page = [{"path_with_namespace": f"tl-agent/repo{i}"} for i in range(100)]
+    httpx_mock.add_response(
+        url="http://localhost:8929/api/v4/groups/tl-agent/projects"
+        "?include_subgroups=true&simple=true&per_page=100&page=1",
+        json=full_page,
+    )
+    httpx_mock.add_response(
+        url="http://localhost:8929/api/v4/groups/tl-agent/projects"
+        "?include_subgroups=true&simple=true&per_page=100&page=2",
+        json=[{"path_with_namespace": "tl-agent/demo"}],
+    )
+    result = await ListGroupProjectsTool().invoke({"group": "tl-agent"}, run_date_iso="2026-05-22")
+    assert isinstance(result, ToolResult)
+    assert len(result.value.projects) == 101
+    assert "tl-agent/demo" in result.value.projects
 
 
 # -------------------- memory (sqlite-backed) --------------------
@@ -503,7 +525,7 @@ async def test_list_commits_rejects_unknown_project() -> None:
     assert isinstance(result, type(result))  # always true; assert below is the real check
     assert result.kind is ToolErrorKind.VALIDATION  # type: ignore[union-attr]
     assert "acme/backend" in result.message  # type: ignore[union-attr]
-    assert "tl-agent/demo" in result.message  # type: ignore[union-attr]
+    assert "tl-agent" in result.message  # type: ignore[union-attr]
 
 
 async def test_get_commit_diff_rejects_unknown_project() -> None:

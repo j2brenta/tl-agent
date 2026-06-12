@@ -23,10 +23,10 @@ from tl_agent.settings import get_settings
 _ENGINEER_HEADER = re.compile(r"^##\s+(?P<name>.+?)\s*$", re.MULTILINE)
 # Accepts both `- **key:** value` and `- **key**: value` forms.
 _BULLET = re.compile(r"^-\s+\*\*(?P<key>[^*]+?)\*\*:?\s*(?P<value>.+?)\s*$")
-_LIST_KEYS = {"aliases"}
+_LIST_KEYS = {"aliases", "gitlab_groups"}
 # H2 sections that are config, not people — parsed into TeamConfig fields and
 # kept out of `members` so they never hit `Engineer.model_validate`.
-_RESERVED_SECTIONS = {"sprint scope"}
+_RESERVED_SECTIONS = {"sprint scope", "repo scope"}
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,7 @@ class TeamConfig:
     members: tuple[Engineer, ...]
     board_id: str | None = None
     sprint_name_pattern: str | None = None
+    gitlab_groups: tuple[str, ...] = ()
 
     @property
     def engineers(self) -> tuple[Engineer, ...]:
@@ -105,6 +106,7 @@ def load_team(config_dir: Path | None = None) -> TeamConfig:
     members: list[Engineer] = []
     board_id: str | None = None
     sprint_name_pattern: str | None = None
+    gitlab_groups: tuple[str, ...] = ()
     for i, hdr in enumerate(headers):
         name = hdr["name"].strip()
         start = hdr.end()
@@ -114,17 +116,27 @@ def load_team(config_dir: Path | None = None) -> TeamConfig:
             attrs = _parse_bullets(block)
             board_id = _as_str(attrs.get("board_id")) or board_id
             sprint_name_pattern = _as_str(attrs.get("sprint_name_pattern")) or sprint_name_pattern
+            gitlab_groups = _as_tuple(attrs.get("gitlab_groups")) or gitlab_groups
             continue
         members.append(_parse_engineer_block(name, block))
     return TeamConfig(
         members=tuple(members),
         board_id=board_id,
         sprint_name_pattern=sprint_name_pattern,
+        gitlab_groups=gitlab_groups,
     )
 
 
 def _as_str(value: str | tuple[str, ...] | None) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _as_tuple(value: str | tuple[str, ...] | None) -> tuple[str, ...]:
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, str):
+        return (value,)
+    return ()
 
 
 def load_markdown(name: str, config_dir: Path | None = None) -> str:

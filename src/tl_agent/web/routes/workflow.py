@@ -319,20 +319,13 @@ async def _collect_jira(selected: str) -> tuple[str | None, list[JiraTicket], st
 async def _collect_gitlab(
     selected: str, since: datetime, until: datetime
 ) -> tuple[list[GitCommit], str | None]:
-    """Pull commits in the window. Returns (commits, error)."""
-    from tl_agent.storage.markdown_loader import load_allowed_gitlab_projects
-    from tl_agent.tools import ToolResult
-    from tl_agent.tools.gitlab import ListCommitsTool
+    """Pull each team engineer's commits across every team project. Returns (commits, error)."""
+    from tl_agent.phases.phase1_collect import fetch_commits
+    from tl_agent.storage import load_team
 
-    projects = sorted(load_allowed_gitlab_projects())
-    project = projects[0] if projects else "tl-agent/demo"
-    outcome = await ListCommitsTool().invoke(
-        {"project": project, "since": since.isoformat(), "until": until.isoformat()},
-        run_date_iso=selected,
-    )
-    if isinstance(outcome, ToolResult):
-        return list(outcome.value.commits), None
-    return [], outcome.message
+    notes: list[str] = []
+    commits = await fetch_commits(load_team(), since, until, selected, notes)
+    return commits, "; ".join(notes) or None
 
 
 def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
