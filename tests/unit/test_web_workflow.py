@@ -293,6 +293,51 @@ def test_collect_route_renders_tickets_and_commits(
     assert "abcdef12" in r.text  # short sha
 
 
+def test_collect_gitlab_route_renders_commits_only(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_gitlab(
+        selected: str, since: datetime, until: datetime
+    ) -> tuple[list[GitCommit], str | None]:
+        commit = GitCommit(
+            sha="abcdef1234567",
+            project="tl-agent/demo",
+            author="john",
+            committed_at=datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
+            message="fix publisher retry [ENG-1]",
+            files_changed=2,
+            insertions=10,
+            deletions=3,
+            linked_ticket_keys=("ENG-1",),
+        )
+        return [commit], None
+
+    monkeypatch.setattr(wf, "_collect_gitlab", _fake_gitlab)
+
+    r = client.post("/workflow/collect_gitlab", data={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert "GitLab — commits" in r.text
+    assert "fix publisher retry" in r.text
+    assert "abcdef12" in r.text
+    assert "Jira" not in r.text
+
+
+def test_collect_gitlab_route_shows_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_gitlab(
+        selected: str, since: datetime, until: datetime
+    ) -> tuple[list[GitCommit], str | None]:
+        return [], "gitlab project discovery failed for group 'tl-agent'"
+
+    monkeypatch.setattr(wf, "_collect_gitlab", _fake_gitlab)
+
+    r = client.post("/workflow/collect_gitlab", data={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert "GitLab fetch failed" in r.text
+    assert "discovery failed" in r.text
+
+
 # -------------------- standup collect + parse --------------------
 
 

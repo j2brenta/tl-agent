@@ -30,6 +30,21 @@ from tl_agent.web.routes import workflow as workflow_route
 logger = logging.getLogger(__name__)
 
 
+class _HealthcheckAccessFilter(logging.Filter):
+    """Drop uvicorn access-log lines for the Docker healthcheck's `GET /`.
+
+    `infra/docker-compose.yml`'s healthcheck polls `http://localhost:8080/`
+    every 15s from inside the container (127.0.0.1) — that's expected noise,
+    not real traffic, and drowns out logs for actual requests.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return 'GET / HTTP/1.1" 200' not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_HealthcheckAccessFilter())
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Process-wide startup/shutdown — sets up OTel and ensures the schema.

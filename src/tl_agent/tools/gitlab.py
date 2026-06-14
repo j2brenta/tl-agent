@@ -10,7 +10,9 @@ remember to set `requires_approval=True` and provide `idempotency_key`.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, ClassVar
 from urllib.parse import quote
@@ -23,6 +25,8 @@ from tl_agent.settings import get_settings
 from tl_agent.tools._http import http_client, raise_from_http_error, raise_from_transport_error
 from tl_agent.tools.base import BaseTool
 from tl_agent.tools.registry import registry
+
+logger = logging.getLogger(__name__)
 
 
 def _encode_path(value: str) -> str:
@@ -71,6 +75,49 @@ def _parse_ticket_keys(text: str) -> tuple[str, ...]:
     return tuple(sorted(set(_TICKET_RE.findall(text))))
 
 
+async def _get(
+    client: httpx.AsyncClient, path: str, params: dict[str, Any], tool_label: str
+) -> httpx.Response:
+    """GET with timing + outcome logging, so a slow/failed GitLab call shows up
+    in logs with the exact path, elapsed time, and (on failure) exception type
+    — the detail needed to tell "GitLab never responded in time" (ReadTimeout,
+    likely Rosetta-emulated GitLab CE under concurrent load) apart from
+    "couldn't even connect" (ConnectError) or other failure modes.
+    """
+    start = time.perf_counter()
+    try:
+        r = await client.get(path, params=params)
+        r.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "gitlab.request_failed tool=%s path=%s status=%d elapsed_ms=%.0f",
+            tool_label,
+            path,
+            exc.response.status_code,
+            (time.perf_counter() - start) * 1000,
+        )
+        raise_from_http_error(exc, tool_label=tool_label)
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "gitlab.request_failed tool=%s path=%s params=%s error=%s elapsed_ms=%.0f timeout=%s",
+            tool_label,
+            path,
+            params,
+            type(exc).__name__,
+            (time.perf_counter() - start) * 1000,
+            client.timeout,
+        )
+        raise_from_transport_error(exc, tool_label=tool_label)
+    logger.debug(
+        "gitlab.request_ok tool=%s path=%s status=%d elapsed_ms=%.0f",
+        tool_label,
+        path,
+        r.status_code,
+        (time.perf_counter() - start) * 1000,
+    )
+    return r
+
+
 async def _paginate_pages(
     client: httpx.AsyncClient,
     path: str,
@@ -83,13 +130,7 @@ async def _paginate_pages(
     items: list[dict[str, Any]] = []
     page = 1
     while True:
-        try:
-            r = await client.get(path, params={**params, "per_page": per_page, "page": page})
-            r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise_from_http_error(exc, tool_label=tool_label)
-        except httpx.HTTPError as exc:
-            raise_from_transport_error(exc, tool_label=tool_label)
+        r = await _get(client, path, {**params, "per_page": per_page, "page": page}, tool_label)
         batch: list[dict[str, Any]] = r.json()
         items.extend(batch)
         if len(batch) < per_page:
@@ -141,13 +182,7 @@ class ListCommitsTool(BaseTool[ListCommitsIn, ListCommitsOut]):
             params["author"] = args.author
         path = f"/api/v4/projects/{_encode_path(args.project)}/repository/commits"
         async with _client() as client:
-            try:
-                r = await client.get(path, params=params)
-                r.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise_from_http_error(exc, tool_label=self.name)
-            except httpx.HTTPError as exc:
-                raise_from_transport_error(exc, tool_label=self.name)
+            r = await _get(client, path, params, self.name)
         data = r.json()
         commits = [_to_commit(item, project=args.project) for item in data]
         return ListCommitsOut(commits=commits)
@@ -209,13 +244,7 @@ class GetCommitDiffTool(BaseTool[GetDiffIn, GetDiffOut]):
     async def _call(self, args: GetDiffIn) -> GetDiffOut:
         path = f"/api/v4/projects/{_encode_path(args.project)}/repository/commits/{args.sha}/diff"
         async with _client() as client:
-            try:
-                r = await client.get(path)
-                r.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise_from_http_error(exc, tool_label=self.name)
-            except httpx.HTTPError as exc:
-                raise_from_transport_error(exc, tool_label=self.name)
+            r = await _get(client, path, {}, self.name)
         data = r.json()
         files = [
             FileDiff(
@@ -266,13 +295,7 @@ class ListBranchesTool(BaseTool[ListBranchesIn, ListBranchesOut]):
     async def _call(self, args: ListBranchesIn) -> ListBranchesOut:
         path = f"/api/v4/projects/{_encode_path(args.project)}/repository/branches"
         async with _client() as client:
-            try:
-                r = await client.get(path)
-                r.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise_from_http_error(exc, tool_label=self.name)
-            except httpx.HTTPError as exc:
-                raise_from_transport_error(exc, tool_label=self.name)
+            r = await _get(client, path, {}, self.name)
         data = r.json()
         return ListBranchesOut(
             branches=[

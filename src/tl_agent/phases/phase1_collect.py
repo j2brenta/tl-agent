@@ -41,13 +41,14 @@ logger = logging.getLogger(__name__)
 @phase_span("phase1_collect")
 async def run(ctx: RunContext) -> DailySignals:
     """Run all four fetches in parallel and assemble the envelope."""
-    # Window: yesterday midnight UTC → end of today (midnight tomorrow UTC).
-    # Using midnight boundaries instead of noon-to-noon means demo seeds run
-    # at any time of day still land inside the window (GitLab's Commits API
-    # always stamps committed_date with wall-clock time; it ignores author_date).
+    # Window: yesterday 12:00 UTC -> today 12:00 UTC — i.e. since the previous
+    # standup, mirroring the real morning-standup cadence. Demo seed data must
+    # be created before 12:00 UTC on run_date to land inside this window
+    # (GitLab's Commits API stamps committed_date with wall-clock time at
+    # creation; see infra/gitlab/apply_commits.py).
     today = ctx.run_date
-    until = datetime.combine(today + timedelta(days=1), time(0, 0), tzinfo=UTC)
-    since = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
+    until = datetime.combine(today, time(12, 0), tzinfo=UTC)
+    since = until - timedelta(days=1)
 
     sprint_task = _fetch_sprint(ctx, since)
     commits_task = _fetch_commits(ctx, since, until)
@@ -157,22 +158,48 @@ async def _discover_projects(team: TeamConfig, run_date_iso: str, notes: list[st
     empty, or when a group's discovery call fails.
     """
     if not team.gitlab_groups:
-        return sorted(load_allowed_gitlab_projects())
+        fallback = sorted(load_allowed_gitlab_projects())
+        logger.debug(
+            "phase1.gitlab_discovery_skipped",
+            extra={"reason": "no gitlab_groups configured", "fallback_projects": fallback},
+        )
+        return fallback
 
     tool = ListGroupProjectsTool()
 
     async def _one(group: str) -> list[str]:
         result = await tool.invoke({"group": group}, run_date_iso=run_date_iso)
         if not isinstance(result, ToolResult):
-            notes.append(f"phase1: gitlab project discovery failed for group {group!r}")
+            notes.append(
+                f"phase1: gitlab project discovery failed for group {group!r} "
+                f"({result.kind.value}): {result.message}"
+            )
+            logger.debug(
+                "phase1.gitlab_discovery_group_failed",
+                extra={"group": group, "kind": result.kind.value, "error_detail": result.message},
+            )
             return []
-        return list(result.value.projects)
+        projects = list(result.value.projects)
+        logger.debug(
+            "phase1.gitlab_discovery_group_ok",
+            extra={"group": group, "projects": projects},
+        )
+        return projects
 
     results = await asyncio.gather(*(_one(g) for g in team.gitlab_groups))
     projects = sorted({p for batch in results for p in batch})
     if not projects:
+        fallback = sorted(load_allowed_gitlab_projects())
         notes.append("phase1: no GitLab projects discovered; falling back to gitlab_projects.yaml")
-        return sorted(load_allowed_gitlab_projects())
+        logger.debug(
+            "phase1.gitlab_discovery_fallback",
+            extra={"gitlab_groups": list(team.gitlab_groups), "fallback_projects": fallback},
+        )
+        return fallback
+    logger.debug(
+        "phase1.gitlab_discovery_resolved",
+        extra={"gitlab_groups": list(team.gitlab_groups), "projects": projects},
+    )
     return projects
 
 
@@ -212,11 +239,43 @@ async def fetch_commits(
         if not isinstance(result, ToolResult):
             notes.append(
                 f"phase1: gitlab commits fetch failed for {project}/{engineer.id} "
-                f"({result.kind.value})"
+                f"({result.kind.value}): {result.message}"
+            )
+            logger.debug(
+                "phase1.gitlab_commits_failed",
+                extra={
+                    "project": project,
+                    "engineer": engineer.id,
+                    "kind": result.kind.value,
+                    "error_detail": result.message,
+                },
             )
             return []
-        return list(result.value.commits)
+        commits = list(result.value.commits)
+        logger.debug(
+            "phase1.gitlab_commits_ok",
+            extra={
+                "project": project,
+                "engineer": engineer.id,
+                "commits": len(commits),
+                "latency_ms": round(result.latency_ms, 1),
+            },
+        )
+        return commits
 
+    # Logged because every (project, engineer) pair fires as a concurrent
+    # `list_commits` call against the same GitLab instance — under the
+    # Rosetta-emulated GitLab CE image (see infra/docker-compose.yml), a fan-out
+    # this wide can queue behind Puma's worker count and trip the 10s httpx
+    # timeout even though each request is individually fast.
+    logger.info(
+        "phase1.gitlab_commits_fanout",
+        extra={
+            "projects": projects,
+            "engineers": [e.id for e in engineers],
+            "concurrent_requests": len(projects) * len(engineers),
+        },
+    )
     results = await asyncio.gather(*(_one(p, e) for p in projects for e in engineers))
     commits: list[GitCommit] = []
     for r in results:

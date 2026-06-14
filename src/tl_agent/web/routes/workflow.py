@@ -282,7 +282,10 @@ async def workflow_resolve(run_id: str = Form(...), sprint_id: str = Form(...)) 
 
 
 def _collect_window(selected: str) -> tuple[datetime, datetime]:
-    """Standup window: yesterday 12:00 → today 12:00 UTC, anchored on `selected`."""
+    """Collection window: yesterday 12:00 -> today 12:00 UTC, anchored on
+    `selected` — matches phase1_collect.run's window (since the previous
+    standup), so these one-shot preview buttons show the same commits/standups
+    a real pipeline run for `selected` would collect."""
     run_date = date_.fromisoformat(selected)
     until = datetime(run_date.year, run_date.month, run_date.day, 12, 0, tzinfo=UTC)
     return until - timedelta(days=1), until
@@ -413,6 +416,28 @@ async def workflow_collect(date: str | None = Form(None)) -> HTMLResponse:
             unknown_count=sum(1 for r in rows if r["unknown"]),
             commits=sorted(commits, key=lambda c: c.committed_at, reverse=True),
             jira_err=jira_err,
+            gitlab_err=gitlab_err,
+        )
+    )
+
+
+@router.post("/workflow/collect_gitlab", response_class=HTMLResponse)
+async def workflow_collect_gitlab(date: str | None = Form(None)) -> HTMLResponse:
+    """One-shot pull of GitLab commits only — isolates the GitLab fetch from
+    the combined `/workflow/collect` (Jira + GitLab), for diagnosing GitLab-side
+    issues (project discovery, timeouts) without re-pulling Jira each time.
+    """
+    selected = _coerce_date(date)
+    since, until = _collect_window(selected)
+
+    commits, gitlab_err = await _collect_gitlab(selected, since, until)
+
+    template = _env.get_template("_workflow_gitlab.html")
+    return HTMLResponse(
+        template.render(
+            since=since.isoformat(),
+            until=until.isoformat(),
+            commits=sorted(commits, key=lambda c: c.committed_at, reverse=True),
             gitlab_err=gitlab_err,
         )
     )

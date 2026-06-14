@@ -82,7 +82,8 @@ if [ -f "$(dirname "$0")/commits.yaml" ]; then
     REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
     # Optional: anchor commits to a specific date so each demo run produces
     # fresh commits whose committed_date = now falls inside the agent's
-    # Phase 1 fetch window for that run_date.
+    # Phase 1 fetch window for that run_date (yesterday 12:00 UTC -> that
+    # date's 12:00 UTC) — run this seed before 12:00 UTC on COMMIT_ANCHOR_DATE.
     ANCHOR_ARGS=()
     if [ -n "${COMMIT_ANCHOR_DATE:-}" ]; then
         ANCHOR_ARGS+=(--anchor-date "${COMMIT_ANCHOR_DATE}")

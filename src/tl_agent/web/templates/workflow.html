@@ -11,6 +11,8 @@
   /* htmx toggles `htmx-request` on the hx-indicator target during the fetch. */
   #collect-spin { display: none; }
   #collect-spin.htmx-request { display: block; }
+  #gitlab-spin { display: none; }
+  #gitlab-spin.htmx-request { display: block; }
   #standup-spin { display: none; }
   #standup-spin.htmx-request { display: block; }
 </style>
@@ -24,6 +26,11 @@
           hx-indicator="#collect-spin">
       <input type="hidden" name="date" value="{{ selected_date }}">
       <button type="submit" class="btn-import">⤓ Collect Jira + GitLab</button>
+    </form>
+    <form hx-post="/workflow/collect_gitlab" hx-target="#workflow-gitlab" hx-swap="innerHTML"
+          hx-indicator="#gitlab-spin">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <button type="submit" class="btn-import">⎇ Collect GitLab</button>
     </form>
     <form hx-post="/workflow/collect_standup" hx-target="#workflow-standup" hx-swap="innerHTML"
           hx-indicator="#standup-spin">
@@ -41,6 +48,11 @@
   Fetching Jira + GitLab…
 </div>
 <div id="workflow-collect"></div>
+
+<div id="gitlab-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
+  Fetching GitLab commits…
+</div>
+<div id="workflow-gitlab" style="margin-bottom:16px"></div>
 
 <div id="standup-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
   Fetching + parsing standup…

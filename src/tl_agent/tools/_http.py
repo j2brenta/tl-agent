@@ -36,10 +36,16 @@ def raise_from_http_error(exc: httpx.HTTPStatusError, *, tool_label: str) -> NoR
 
 
 def raise_from_transport_error(exc: httpx.HTTPError, *, tool_label: str) -> NoReturn:
-    """Translate a connection/timeout error into a retriable ToolException."""
+    """Translate a connection/timeout error into a retriable ToolException.
+
+    httpx timeout exceptions (`ConnectTimeout`, `ReadTimeout`, `PoolTimeout`)
+    often stringify to "" — include the exception type so notes/logs can
+    distinguish "never connected" from "connected but the response never
+    arrived" from "queued behind other requests on the same client".
+    """
     raise ToolException(
         kind=ToolErrorKind.TIMEOUT,
-        message=f"{tool_label}: transport error: {exc}",
+        message=f"{tool_label}: transport error ({type(exc).__name__}): {exc}",
         retriable=True,
     ) from exc
 

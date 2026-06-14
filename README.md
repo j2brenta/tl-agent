@@ -316,6 +316,18 @@ make reset-state   # wipe SQLite, re-apply schema, re-seed
 make nuke          # also wipe Mattermost/GitLab volumes
 ```
 
+## Gitlab
+Admin user is root. Default password is set on container creation for 24 hours. To reset it afterwards.
+```
+docker exec tla-gitlab gitlab-rails runner "u = User.find_by_username('root'); u.password = 'tla-dev-pass123'; u.password_confirmation = 'tla-dev-pass123'; u.save!"
+```
+
+## Seed
+Seed for today
+```
+COMMIT_ANCHOR_DATE=2026-06-14 bash infra/gitlab/seed.sh
+```
+
 ---
 
 ## Test plan

@@ -10,9 +10,10 @@ only reads the diff stats, not the actual file contents.
 - Passing `--anchor-date YYYY-MM-DD` namespaces the path under
   `seed/<anchor>/<sha>.txt` and the branch as `<branch>-<anchor>`, forcing
   fresh commits per anchor. GitLab's Commits API always stamps committed_date
-  with wall-clock time (author_date/commit_date fields are ignored), so Phase 1
-  uses a midnight-to-midnight window over run_date to capture seed commits
-  regardless of when the seed runs.
+  with wall-clock time (author_date/commit_date fields are ignored), so to
+  land inside Phase 1's collection window for `--anchor-date` (yesterday
+  12:00 UTC -> that date's 12:00 UTC), run this seed before 12:00 UTC on
+  that date.
 """
 
 from __future__ import annotations
