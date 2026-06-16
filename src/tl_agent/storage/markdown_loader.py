@@ -42,6 +42,7 @@ class TeamConfig:
     board_id: str | None = None
     sprint_name_pattern: str | None = None
     gitlab_groups: tuple[str, ...] = ()
+    monday_weekend_lookback: bool = True
 
     @property
     def engineers(self) -> tuple[Engineer, ...]:
@@ -107,6 +108,7 @@ def load_team(config_dir: Path | None = None) -> TeamConfig:
     board_id: str | None = None
     sprint_name_pattern: str | None = None
     gitlab_groups: tuple[str, ...] = ()
+    monday_weekend_lookback: bool = True
     for i, hdr in enumerate(headers):
         name = hdr["name"].strip()
         start = hdr.end()
@@ -117,6 +119,9 @@ def load_team(config_dir: Path | None = None) -> TeamConfig:
             board_id = _as_str(attrs.get("board_id")) or board_id
             sprint_name_pattern = _as_str(attrs.get("sprint_name_pattern")) or sprint_name_pattern
             gitlab_groups = _as_tuple(attrs.get("gitlab_groups")) or gitlab_groups
+            mwl = _as_str(attrs.get("monday_weekend_lookback"))
+            if mwl is not None:
+                monday_weekend_lookback = mwl.lower() not in ("false", "no", "0")
             continue
         members.append(_parse_engineer_block(name, block))
     return TeamConfig(
@@ -124,6 +129,7 @@ def load_team(config_dir: Path | None = None) -> TeamConfig:
         board_id=board_id,
         sprint_name_pattern=sprint_name_pattern,
         gitlab_groups=gitlab_groups,
+        monday_weekend_lookback=monday_weekend_lookback,
     )
 
 

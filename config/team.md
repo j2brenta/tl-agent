@@ -39,6 +39,7 @@ multiple groups (e.g. `tl-agent, tl-agent-mobile`). `config/gitlab_projects.yaml
 is the fallback when `gitlab_groups` is unset.
 
 - **gitlab_groups:** tl-agent
+- **monday_weekend_lookback:** true
 
 ---
 

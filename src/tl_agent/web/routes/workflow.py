@@ -397,19 +397,22 @@ def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
 
 @router.post("/workflow/collect", response_class=HTMLResponse)
 async def workflow_collect(date: str | None = Form(None)) -> HTMLResponse:
+    from tl_agent.phases.phase1_collect import gitlab_commit_window
+    from tl_agent.storage import load_team
+
     selected = _coerce_date(date)
-    since, until = _collect_window(selected)
+    commit_since, commit_until = gitlab_commit_window(date_.fromisoformat(selected), load_team())
 
     sprint_id, tickets, jira_err = await _collect_jira(selected)
-    commits, gitlab_err = await _collect_gitlab(selected, since, until)
+    commits, gitlab_err = await _collect_gitlab(selected, commit_since, commit_until)
 
     rows = _ticket_rows(tickets)
     template = _env.get_template("_workflow_collect.html")
     return HTMLResponse(
         template.render(
             selected_date=selected,
-            since=since.isoformat(),
-            until=until.isoformat(),
+            since=commit_since.isoformat(),
+            until=commit_until.isoformat(),
             sprint_id=sprint_id,
             rows=rows,
             missing_count=sum(1 for r in rows if r["missing"]),
@@ -427,8 +430,11 @@ async def workflow_collect_gitlab(date: str | None = Form(None)) -> HTMLResponse
     the combined `/workflow/collect` (Jira + GitLab), for diagnosing GitLab-side
     issues (project discovery, timeouts) without re-pulling Jira each time.
     """
+    from tl_agent.phases.phase1_collect import gitlab_commit_window
+    from tl_agent.storage import load_team
+
     selected = _coerce_date(date)
-    since, until = _collect_window(selected)
+    since, until = gitlab_commit_window(date_.fromisoformat(selected), load_team())
 
     commits, gitlab_err = await _collect_gitlab(selected, since, until)
 

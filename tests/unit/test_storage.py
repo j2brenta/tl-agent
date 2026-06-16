@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -420,6 +421,27 @@ def test_load_team_separates_leadership_from_engineers() -> None:
     # members is the full roster; by_id resolves leadership too.
     assert len(team.members) == len(team.engineers) + 2
     assert team.by_id(team.product_manager.id) is team.product_manager
+
+
+def test_load_team_monday_weekend_lookback_default() -> None:
+    # config/team.md currently sets monday_weekend_lookback: true.
+    team = load_team()
+    assert team.monday_weekend_lookback is True
+
+
+def test_load_team_monday_weekend_lookback_parses_false(tmp_path: Path) -> None:
+    from tl_agent.storage.markdown_loader import load_team as _load
+
+    team_md = (Path(__file__).parents[2] / "config" / "team.md").read_text()
+    team_md = team_md.replace(
+        "- **monday_weekend_lookback:** true",
+        "- **monday_weekend_lookback:** false",
+    )
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "team.md").write_text(team_md)
+    team = _load(config_dir=config_dir)
+    assert team.monday_weekend_lookback is False
 
 
 # -------------------- working context --------------------

@@ -14,7 +14,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Iterable
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from tl_agent.models import (
     DailySignals,
@@ -38,20 +38,37 @@ from tl_agent.tools.jira import ListSprintTool
 logger = logging.getLogger(__name__)
 
 
+def gitlab_commit_window(run_date: date, team: TeamConfig) -> tuple[datetime, datetime]:
+    """Compute the GitLab commit collection window for `run_date`.
+
+    Normally yesterday 12:00 UTC → today 12:00 UTC (same as the standup
+    window). On Mondays, when `team.monday_weekend_lookback` is true, the
+    window is extended back to Friday 12:00 UTC so commits pushed on Friday
+    evening or over the weekend are not silently dropped.
+    """
+    until = datetime.combine(run_date, time(12, 0), tzinfo=UTC)
+    lookback_days = 1
+    if team.monday_weekend_lookback and run_date.weekday() == 0:
+        lookback_days = 3
+    return until - timedelta(days=lookback_days), until
+
+
 @phase_span("phase1_collect")
 async def run(ctx: RunContext) -> DailySignals:
     """Run all four fetches in parallel and assemble the envelope."""
-    # Window: yesterday 12:00 UTC -> today 12:00 UTC — i.e. since the previous
-    # standup, mirroring the real morning-standup cadence. Demo seed data must
-    # be created before 12:00 UTC on run_date to land inside this window
-    # (GitLab's Commits API stamps committed_date with wall-clock time at
-    # creation; see infra/gitlab/apply_commits.py).
+    # Standup/sprint window: yesterday 12:00 UTC -> today 12:00 UTC — mirrors
+    # the real morning-standup cadence. Demo seed data must be created before
+    # 12:00 UTC on run_date to land inside this window (GitLab's Commits API
+    # stamps committed_date with wall-clock time at creation; see
+    # infra/gitlab/apply_commits.py).
     today = ctx.run_date
     until = datetime.combine(today, time(12, 0), tzinfo=UTC)
     since = until - timedelta(days=1)
+    # Commits window may be wider (Friday → Monday) on Mondays.
+    commit_since, commit_until = gitlab_commit_window(today, ctx.team)
 
     sprint_task = _fetch_sprint(ctx, since)
-    commits_task = _fetch_commits(ctx, since, until)
+    commits_task = _fetch_commits(ctx, commit_since, commit_until)
     standups_today_task = fetch_standups(ctx, since=since, until=until)
     standups_yesterday_task = fetch_standups(ctx, since=since - timedelta(days=1), until=since)
 
@@ -75,6 +92,8 @@ async def run(ctx: RunContext) -> DailySignals:
             "run_date": ctx.run_date_iso,
             "window_since": since.isoformat(),
             "window_until": until.isoformat(),
+            "commit_window_since": commit_since.isoformat(),
+            "commit_window_until": commit_until.isoformat(),
             "sprint_id": ctx.sprint_id,
             "sprint_day": sprint_day,
             "sprint_length_days": sprint_length,
