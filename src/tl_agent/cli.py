@@ -253,6 +253,50 @@ def import_jira(
     console.print(f"[green]imported {n} tickets for {target.isoformat()}[/green]")
 
 
+# Instance-specific config: per-deployment, must survive a `git pull`. The
+# contract files (router*.yaml, prompts.yaml, escalation.md) are intentionally
+# excluded — those should keep tracking the committed version.
+_LOCAL_CONFIG_FILES = (
+    "team.md",
+    "ownership.md",
+    "tl_preferences.md",
+    "gitlab_projects.yaml",
+    "chat_channels.yaml",
+)
+
+
+@app.command(name="init-local-config")
+def init_local_config(
+    force: Annotated[
+        bool,
+        _opt("--force", help="overwrite files that already exist in the local dir"),
+    ] = False,
+) -> None:
+    """Seed the local override dir with copies of the committed instance config.
+
+    Files placed in `local_config_dir` shadow the committed defaults, so you can
+    edit your roster / allowlists there and `git pull` won't clobber them. Run
+    once per machine, then edit the copies. Override the location with
+    `TLA_LOCAL_CONFIG_DIR` (defaults to `$XDG_CONFIG_HOME/tl-agent`).
+    """
+    import shutil
+
+    from tl_agent.settings import get_settings
+
+    settings = get_settings()
+    dest_dir = settings.local_config_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    console.print(f"local config dir: [cyan]{dest_dir}[/cyan]")
+    for name in _LOCAL_CONFIG_FILES:
+        src = settings.config_dir / name
+        dest = dest_dir / name
+        if dest.exists() and not force:
+            console.print(f"  [yellow]skip[/yellow] {name} (exists — use --force)")
+            continue
+        shutil.copyfile(src, dest)
+        console.print(f"  [green]copied[/green] {name}")
+
+
 @app.command()
 def reset(
     confirm: Annotated[

@@ -10,6 +10,7 @@ LAYER 1 (markdown config) is loaded by `storage.markdown_loader`, not here.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +19,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = REPO_ROOT / ".env"
+
+
+def _default_local_config_dir() -> Path:
+    """Per-deployment config override dir, honouring `XDG_CONFIG_HOME`."""
+    base = os.environ.get("XDG_CONFIG_HOME")
+    return (Path(base) if base else Path.home() / ".config") / "tl-agent"
 
 
 class Settings(BaseSettings):
@@ -33,6 +40,10 @@ class Settings(BaseSettings):
     # paths
     repo_root: Path = REPO_ROOT
     config_dir: Path = REPO_ROOT / "config"
+    # Per-deployment overrides that must survive a `git pull`. Any config file
+    # dropped here shadows the committed default of the same name (see
+    # `resolve_config`). Lives outside the working tree, gitignored.
+    local_config_dir: Path = Field(default_factory=_default_local_config_dir)
     prompts_dir: Path = REPO_ROOT / "prompts"
     traces_dir: Path = REPO_ROOT / "traces"
     sqlite_path: Path = REPO_ROOT / "data" / "tl_agent.db"
@@ -129,6 +140,18 @@ class Settings(BaseSettings):
 
     # run-level budgets
     run_token_budget: int = 500_000
+
+    def resolve_config(self, name: str) -> Path:
+        """Resolve a config file by name, preferring the local override dir.
+
+        A file in `local_config_dir` shadows the committed default of the same
+        name in `config_dir`, so a `git pull` that updates the repo never
+        clobbers per-deployment config (team roster, allowlists, board id).
+        Opt-in per file: only what you drop into the local dir is overridden;
+        everything else keeps tracking the committed (contract) version.
+        """
+        override = self.local_config_dir / name
+        return override if override.exists() else self.config_dir / name
 
 
 def get_settings() -> Settings:

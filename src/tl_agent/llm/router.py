@@ -122,7 +122,7 @@ def build_default(*, config_path: Path | str | None = None) -> Router:
         override = Path(settings.router_config)
         cfg_path = override if override.is_absolute() else settings.repo_root / override
     else:
-        cfg_path = settings.config_dir / "router.yaml"
+        cfg_path = settings.resolve_config("router.yaml")
     config = RouterConfig.load(cfg_path)
 
     providers: dict[str, Provider] = {

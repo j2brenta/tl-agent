@@ -48,6 +48,10 @@ traces/
 .env.local
 *.pem
 
+# Local per-deployment config overrides (TLA_LOCAL_CONFIG_DIR), when pointed
+# at a repo-relative dir instead of ~/.config/tl-agent.
+config.local/
+
 # Docker / compose runtime
 infra/data/
 infra/mattermost/data/

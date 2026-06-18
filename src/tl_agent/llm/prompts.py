@@ -46,7 +46,7 @@ class PromptsConfig(BaseModel):
 
 
 def load_prompts_config(path: Path | None = None) -> PromptsConfig:
-    target = path or get_settings().config_dir / "prompts.yaml"
+    target = path or get_settings().resolve_config("prompts.yaml")
     if not target.exists():
         # Default: v1 for every known phase
         return PromptsConfig(
