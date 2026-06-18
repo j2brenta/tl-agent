@@ -229,17 +229,26 @@ def import_jira(
     from datetime import date as _date
 
     from tl_agent.settings import get_settings
-    from tl_agent.storage import connect, transaction
+    from tl_agent.storage import connect, load_team, transaction
     from tl_agent.storage.repos import snapshots as snapshots_repo
     from tl_agent.tools.jira import ListSprintIn, ListSprintTool
 
     target = _date.fromisoformat(run_date) if run_date else _date.today()
 
+    board_id = load_team().board_id
+    if not board_id:
+        raise typer.BadParameter(
+            "no board configured — add `- **board_id:** <id>` under Sprint scope "
+            "in team.md (config/ default, or your local override dir). The active "
+            "sprint on that board is what gets imported."
+        )
+
     async def _run() -> int:
         tool = ListSprintTool()
         from tl_agent.tools.base import ToolError
 
-        outcome = await tool.invoke(ListSprintIn().model_dump(), run_date_iso=target.isoformat())
+        args = ListSprintIn(board_id=board_id).model_dump()
+        outcome = await tool.invoke(args, run_date_iso=target.isoformat())
         if isinstance(outcome, ToolError):
             raise RuntimeError(outcome.message)
         result = outcome.value
