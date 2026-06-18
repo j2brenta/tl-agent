@@ -1,7 +1,9 @@
 """Discovery tab — renders GitLab coverage + unconfigured contributors.
 
-The route calls `fetch_commits` (live GitLab); we monkeypatch it to a canned
-`(commits, manifest)` so the render is deterministic and network-free.
+The page shell (`GET /discovery`) renders without any GitLab fetch; the live
+pull lives in the fragment (`GET /discovery/fragment`). The fragment calls
+`fetch_commits`, which we monkeypatch to a canned `(commits, manifest)` so the
+render is deterministic and network-free.
 """
 
 from __future__ import annotations
@@ -31,7 +33,22 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     yield TestClient(app)
 
 
-def test_discovery_page_lists_projects_and_unconfigured(
+def test_discovery_shell_renders_without_fetch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The page shell must not touch GitLab — if it did, this would blow up.
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("page shell must not call fetch_commits")
+
+    monkeypatch.setattr(disc, "fetch_commits", _boom)
+
+    r = client.get("/discovery?date=2026-05-22")
+    assert r.status_code == 200
+    assert 'id="discovery-content"' in r.text
+    assert "/discovery/fragment?date=2026-05-22" in r.text
+
+
+def test_discovery_fragment_lists_projects_and_unconfigured(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manifest = CollectionManifest(
@@ -55,7 +72,7 @@ def test_discovery_page_lists_projects_and_unconfigured(
 
     monkeypatch.setattr(disc, "fetch_commits", _fake_fetch)
 
-    r = client.get("/discovery?date=2026-05-22")
+    r = client.get("/discovery/fragment?date=2026-05-22")
     assert r.status_code == 200
     assert "tl-agent/demo" in r.text
     assert "outsider@other.local" in r.text
@@ -63,7 +80,7 @@ def test_discovery_page_lists_projects_and_unconfigured(
     assert "0ut51d3a" in r.text  # short sample sha
 
 
-def test_discovery_page_clean_when_all_resolve(
+def test_discovery_fragment_clean_when_all_resolve(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manifest = CollectionManifest(
@@ -78,6 +95,6 @@ def test_discovery_page_clean_when_all_resolve(
 
     monkeypatch.setattr(disc, "fetch_commits", _fake_fetch)
 
-    r = client.get("/discovery?date=2026-05-22")
+    r = client.get("/discovery/fragment?date=2026-05-22")
     assert r.status_code == 200
     assert "resolves to someone on the roster" in r.text

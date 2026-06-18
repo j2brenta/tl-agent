@@ -1,12 +1,19 @@
 """GitLab discovery & coverage — what the morning loop looked at, and who
 pushed that we don't recognise.
 
-Route:
-  GET /discovery  — for the selected date's commit window, show the GitLab
-                    group(s) discovered, a per-project coverage table (was it
-                    searched, how many commits, any error), and the
-                    "unconfigured contributors" list: commit authors that don't
-                    resolve to anyone on the roster (config/team.md).
+Routes:
+  GET /discovery           — page shell (renders instantly, no live fetch)
+  GET /discovery/fragment  — HTMX fragment: the live GitLab pull for the
+                             selected date's commit window — GitLab group(s)
+                             discovered, a per-project coverage table (searched?
+                             how many commits, any error), and the
+                             "unconfigured contributors" list: commit authors
+                             that don't resolve to anyone on the roster.
+
+The fetch lives in the fragment (loaded async with a spinner) — not the page
+GET — so the page opens immediately even when GitLab is slow or unreachable
+(otherwise the GET blocks on per-project timeouts + retries). Same pattern as
+the Workflow tab's GitLab collection.
 
 This is the GitLab mirror of the Team tab's identity-mapping view. Phase 1
 fetches every commit per project and buckets authors via `team.resolve()`
@@ -58,6 +65,21 @@ def _available_dates(conn: sqlite3.Connection) -> list[str]:
 
 @router.get("/discovery", response_class=HTMLResponse)
 async def discovery(date: str | None = None) -> HTMLResponse:
+    """Page shell — renders instantly; the GitLab pull is loaded by the
+    fragment so a slow/unreachable GitLab never blocks the page from opening."""
+    selected = _coerce_date(date)
+    conn = _conn()
+    try:
+        available_dates = _available_dates(conn)
+    finally:
+        conn.close()
+    template = _env.get_template("discovery.html")
+    return HTMLResponse(template.render(selected_date=selected, available_dates=available_dates))
+
+
+@router.get("/discovery/fragment", response_class=HTMLResponse)
+async def discovery_fragment(date: str | None = None) -> HTMLResponse:
+    """The live GitLab pull + manifest render. Loaded async by the page shell."""
     selected = _coerce_date(date)
     team = load_team()
     since, until = gitlab_commit_window(date_.fromisoformat(selected), team)
@@ -65,17 +87,9 @@ async def discovery(date: str | None = None) -> HTMLResponse:
     notes: list[str] = []
     commits, manifest = await fetch_commits(team, since, until, selected, notes)
 
-    conn = _conn()
-    try:
-        available_dates = _available_dates(conn)
-    finally:
-        conn.close()
-
-    template = _env.get_template("discovery.html")
+    template = _env.get_template("_discovery_fragment.html")
     return HTMLResponse(
         template.render(
-            selected_date=selected,
-            available_dates=available_dates,
             since=since.isoformat(),
             until=until.isoformat(),
             manifest=manifest,
