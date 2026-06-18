@@ -50,6 +50,10 @@ def run(
         bool,
         _opt("--verbose/--quiet", help="Stream phase progress + tool calls to stderr"),
     ] = True,
+    reuse: Annotated[
+        bool,
+        _opt("--reuse/--fresh", help="Reuse locally-cached collection instead of fetching"),
+    ] = False,
 ) -> None:
     """Run the full 8-phase tech-lead loop for the given date."""
     import logging
@@ -70,7 +74,7 @@ def run(
     target = date_cls.fromisoformat(run_date) if run_date else date_cls.today()
     console.print(f"[bold]tl-agent[/bold] running for {target.isoformat()}")
     _print_router_summary()
-    result = asyncio.run(orch_run(target))
+    result = asyncio.run(orch_run(target, reuse_cached=reuse))
 
     table = Table(title=f"Run {result.run_id} — {result.run_date.isoformat()}")
     table.add_column("metric")

@@ -13,7 +13,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -22,6 +22,7 @@ from tl_agent.phases.phase8_execute import execute_decision
 from tl_agent.storage import connect
 from tl_agent.storage.repos import decisions as decisions_repo
 from tl_agent.tools import SqliteIdempotencyStore
+from tl_agent.web import _dates
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,13 +38,13 @@ def _conn() -> object:
 
 
 @router.get("/brief", response_class=HTMLResponse)
-async def brief(date: str | None = None) -> HTMLResponse:
+async def brief(request: Request, date: str | None = None) -> HTMLResponse:
     conn = _conn()
-    selected = _validate_date(date)
+    selected = _validate_date(date) or _dates.cookie_date(request)
     pending = decisions_repo.list_pending(conn, run_date=selected)  # type: ignore[arg-type]
     available = decisions_repo.list_run_dates(conn)  # type: ignore[arg-type]
     template = _env.get_template("brief.html")
-    return HTMLResponse(
+    response = HTMLResponse(
         template.render(
             pending=pending,
             today=selected or _today_iso(),
@@ -51,6 +52,9 @@ async def brief(date: str | None = None) -> HTMLResponse:
             available_dates=available,
         )
     )
+    if selected:
+        _dates.set_date_cookie(response, selected)
+    return response
 
 
 def _validate_date(raw: str | None) -> str | None:

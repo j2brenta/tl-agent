@@ -30,6 +30,10 @@ class RunContext:
     project: str = "tl-agent/demo"
     standup_channel_id: str = "town-square"
     sprint_id: str | None = None
+    # When True, Phase 1 rebuilds DailySignals from locally-cached collection
+    # (ticket_snapshots, collected_commits, standup_observations, …) instead of
+    # fetching from Jira/GitLab/chat — the Workflow "Reuse stored & run" path.
+    reuse_cached: bool = False
     notes: list[str] = field(default_factory=list[str])
 
     @property

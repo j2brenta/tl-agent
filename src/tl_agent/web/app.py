@@ -11,6 +11,7 @@ React app would be overkill.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from fastapi.responses import HTMLResponse
 
 from tl_agent.obs.tracing import init_tracing
 from tl_agent.web.routes import decisions as decisions_route
-from tl_agent.web.routes import discovery as discovery_route
+from tl_agent.web.routes import gitlab as gitlab_route
 from tl_agent.web.routes import review as review_route
 from tl_agent.web.routes import runs as runs_route
 from tl_agent.web.routes import sprint as sprint_route
@@ -45,15 +46,43 @@ class _HealthcheckAccessFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_HealthcheckAccessFilter())
 
+# Hold strong refs so the GC doesn't cancel the in-flight startup discovery task.
+_BG_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _discover_projects_on_startup() -> None:
+    """Background project discovery: persist the team's GitLab project registry.
+
+    Runs once per startup (and re-runs on the next), upserting what each group
+    returns and flagging gone projects — so the Gitlab tab opens instantly off
+    the registry and pipeline runs reuse it. Tolerant: logs and exits on any
+    failure rather than taking down the event loop.
+    """
+    from tl_agent.phases.discovery import discover_and_persist
+    from tl_agent.settings import get_settings
+    from tl_agent.storage import connect, load_team
+
+    conn = connect(get_settings().sqlite_path)
+    try:
+        await discover_and_persist(conn, load_team())
+    except Exception:
+        logger.exception("startup project discovery failed")
+    finally:
+        conn.close()
+
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Process-wide startup/shutdown — sets up OTel and ensures the schema.
+    """Process-wide startup/shutdown — sets up OTel, ensures the schema, and
+    kicks off background project discovery.
 
     The schema-ensure mirrors `phases.orchestrator.run`: it makes the web UI
     self-healing on a fresh deployment (e.g. the containerised path, where the
     bind-mounted `data/` starts empty) instead of 500ing with "no such table".
     `initialize` is idempotent — schema.sql is all `CREATE … IF NOT EXISTS`.
+
+    Discovery is fire-and-forget so a slow/unreachable GitLab never blocks the
+    server from accepting requests.
     """
     from tl_agent.settings import get_settings
     from tl_agent.storage import connect, initialize
@@ -67,6 +96,10 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         initialize(conn)
     finally:
         conn.close()
+
+    task = asyncio.create_task(_discover_projects_on_startup())
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
 
     yield
 
@@ -89,7 +122,7 @@ app.include_router(sprint_route.router)
 app.include_router(runs_route.router)
 app.include_router(team_route.router)
 app.include_router(workflow_route.router)
-app.include_router(discovery_route.router)
+app.include_router(gitlab_route.router)
 
 
 @app.post("/jira/import", response_class=HTMLResponse)

@@ -9,12 +9,8 @@
 </script>
 <style>
   /* htmx toggles `htmx-request` on the hx-indicator target during the fetch. */
-  #collect-spin { display: none; }
-  #collect-spin.htmx-request { display: block; }
-  #gitlab-spin { display: none; }
-  #gitlab-spin.htmx-request { display: block; }
-  #standup-spin { display: none; }
-  #standup-spin.htmx-request { display: block; }
+  #jira-spin, #gitlab-spin, #standup-spin { display: none; }
+  #jira-spin.htmx-request, #gitlab-spin.htmx-request, #standup-spin.htmx-request { display: block; }
 </style>
 {% endblock %}
 
@@ -22,10 +18,10 @@
 <div class="page-header">
   <h1>Workflow <span class="sprint-name">morning loop · {{ selected_date }}</span></h1>
   <div style="margin-left:auto;display:flex;gap:8px">
-    <form hx-post="/workflow/collect" hx-target="#workflow-collect" hx-swap="innerHTML"
-          hx-indicator="#collect-spin">
+    <form hx-post="/workflow/collect_jira" hx-target="#workflow-jira-card" hx-swap="outerHTML"
+          hx-indicator="#jira-spin">
       <input type="hidden" name="date" value="{{ selected_date }}">
-      <button type="submit" class="btn-import">⤓ Collect Jira + GitLab</button>
+      <button type="submit" class="btn-import">⤓ Collect Jira only</button>
     </form>
     <form hx-post="/workflow/collect_gitlab" hx-target="#workflow-gitlab" hx-swap="innerHTML"
           hx-indicator="#gitlab-spin">
@@ -37,22 +33,27 @@
       <input type="hidden" name="date" value="{{ selected_date }}">
       <button type="submit" class="btn-import">✎ Collect Standup</button>
     </form>
-    <form hx-post="/workflow/run" hx-target="#workflow-content" hx-swap="outerHTML">
-      <input type="hidden" name="date" value="{{ selected_date }}">
-      <button type="submit" class="btn-import">▶ Run now</button>
-    </form>
+    <button class="btn-import"
+            hx-get="/workflow/run_prompt?date={{ selected_date }}"
+            hx-target="#workflow-runzone" hx-swap="outerHTML">▶ Run now</button>
   </div>
 </div>
 
-<div id="collect-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
-  Fetching Jira + GitLab…
-</div>
-<div id="workflow-collect"></div>
+<div id="workflow-runzone"></div>
 
-<div id="gitlab-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
-  Fetching GitLab commits…
+<div id="jira-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">Refreshing Jira…</div>
+<div id="workflow-jira"
+     hx-get="/workflow/jira_fragment?date={{ selected_date }}"
+     hx-trigger="load" hx-swap="innerHTML">
+  <span style="font-size:12px;color:var(--text-faint)">Loading Jira…</span>
 </div>
-<div id="workflow-gitlab" style="margin-bottom:16px"></div>
+
+<div id="gitlab-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">Refreshing GitLab commits…</div>
+<div id="workflow-gitlab" style="margin-bottom:16px"
+     hx-get="/workflow/gitlab_fragment?date={{ selected_date }}"
+     hx-trigger="load" hx-swap="innerHTML">
+  <span style="font-size:12px;color:var(--text-faint)">Loading GitLab…</span>
+</div>
 
 <div id="standup-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
   Fetching + parsing standup…

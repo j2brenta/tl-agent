@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 
 from tl_agent.models import (
     CollectionManifest,
@@ -58,7 +60,30 @@ def gitlab_commit_window(run_date: date, team: TeamConfig) -> tuple[datetime, da
 
 @phase_span("phase1_collect")
 async def run(ctx: RunContext) -> DailySignals:
-    """Run all four fetches in parallel and assemble the envelope."""
+    """Run all four fetches in parallel and assemble the envelope.
+
+    When `ctx.reuse_cached` is set and a cached collection exists for the run
+    date, rebuild the envelope from local storage instead of fetching — the
+    Workflow "Reuse stored & run" path. Otherwise fetch fresh and persist the
+    result so a later reuse (or the Gitlab tab) can read it back.
+    """
+    if ctx.reuse_cached:
+        cached = _load_cached_signals(ctx)
+        if cached is not None:
+            logger.info(
+                "phase1.reused_cache",
+                extra={
+                    "run_date": ctx.run_date_iso,
+                    "sprint_tickets": len(cached.sprint_tickets),
+                    "commits": len(cached.commits),
+                    "standups_today": len(cached.standups_today),
+                },
+            )
+            return cached
+        ctx.notes.append(
+            "phase1: reuse requested but nothing cached for this date; collecting fresh"
+        )
+
     # Standup/sprint window: yesterday 12:00 UTC -> today 12:00 UTC — mirrors
     # the real morning-standup cadence. Demo seed data must be created before
     # 12:00 UTC on run_date to land inside this window (GitLab's Commits API
@@ -115,7 +140,7 @@ async def run(ctx: RunContext) -> DailySignals:
             "notes": list(ctx.notes),
         },
     )
-    return DailySignals(
+    signals = DailySignals(
         run_date=ctx.run_date_iso,
         standups_today=st_today,
         standups_yesterday=st_yesterday,
@@ -127,6 +152,115 @@ async def run(ctx: RunContext) -> DailySignals:
         sprint_length_days=sprint_length,
         collection_manifest=manifest,
     )
+    _persist_collection(ctx, signals)
+    return signals
+
+
+# ---------- persistence + reuse ----------
+
+
+def _persist_collection(ctx: RunContext, signals: DailySignals) -> None:
+    """Cache a fresh collection so a later reuse run / the Gitlab tab can read
+    it back without re-fetching. Best-effort: a storage hiccup must not abort a
+    run that already produced its signals."""
+    from tl_agent.storage import transaction
+    from tl_agent.storage.repos import collection_state
+    from tl_agent.storage.repos import commits as commits_repo
+    from tl_agent.storage.repos import observations as obs_repo
+    from tl_agent.storage.repos import snapshots as snapshots_repo
+
+    conn = ctx.sqlite
+    try:
+        with transaction(conn):
+            for ticket in signals.sprint_tickets:
+                snapshots_repo.upsert(conn, ctx.run_date, ticket)
+            commits_repo.replace_for_date(conn, ctx.run_date, signals.commits)
+            for msg in [*signals.standups_today, *signals.standups_yesterday]:
+                msg_date = date.fromisoformat(msg.date_iso)
+                obs_repo.upsert(
+                    conn,
+                    obs_id=f"{msg.date_iso}:{msg.engineer_id}",
+                    run_date=msg_date,
+                    engineer_id=msg.engineer_id,
+                    raw=msg.raw,
+                    summary=None,
+                    chat_message_id=msg.chat_message_id,
+                )
+            collection_state.set_jira(
+                conn,
+                ctx.run_date,
+                sprint_id=ctx.sprint_id,
+                sprint_day=signals.sprint_day,
+                sprint_length=signals.sprint_length_days,
+                tickets_count=len(signals.sprint_tickets),
+            )
+            collection_state.set_gitlab(
+                conn,
+                ctx.run_date,
+                manifest=signals.collection_manifest or CollectionManifest(),
+                commits_count=len(signals.commits),
+            )
+    except Exception:
+        logger.warning("phase1.persist_failed", extra={"run_date": ctx.run_date_iso})
+
+
+def _load_cached_signals(ctx: RunContext) -> DailySignals | None:
+    """Rebuild DailySignals from locally-cached collection for `ctx.run_date`.
+
+    Returns None when no collection has been recorded for the date (the caller
+    then falls back to a fresh fetch). Sprint progress + the GitLab manifest come
+    from `collection_state`; tickets/commits/standups/segments from their caches.
+    """
+    from tl_agent.storage.repos import collection_state
+    from tl_agent.storage.repos import commits as commits_repo
+    from tl_agent.storage.repos import observations as obs_repo
+    from tl_agent.storage.repos import snapshots as snapshots_repo
+    from tl_agent.storage.repos import standup_segments as segments_repo
+
+    conn = ctx.sqlite
+    state = collection_state.get(conn, ctx.run_date)
+    if state is None:
+        return None
+
+    today = ctx.run_date
+    yesterday = today - timedelta(days=1)
+
+    sprint_tickets = snapshots_repo.list_for_date(conn, today)
+    yesterday_tickets = snapshots_repo.list_for_date(conn, yesterday)
+    yesterday_keys = {t.key for t in yesterday_tickets}
+    added_since = [t for t in sprint_tickets if t.key not in yesterday_keys]
+
+    commits = commits_repo.list_for_date(conn, today)
+    standups_today = _observations_as_messages(obs_repo.list_for_date(conn, today))
+    standups_yesterday = _observations_as_messages(obs_repo.list_for_date(conn, yesterday))
+    segments = segments_repo.list_for_date(conn, today.isoformat())
+
+    manifest = state.manifest or CollectionManifest(gitlab_groups=tuple(ctx.team.gitlab_groups))
+
+    return DailySignals(
+        run_date=ctx.run_date_iso,
+        standups_today=standups_today,
+        standups_yesterday=standups_yesterday,
+        standup_segments=segments,
+        sprint_tickets=sprint_tickets,
+        tickets_added_since_yesterday=added_since,
+        commits=commits,
+        sprint_day=state.sprint_day or 1,
+        sprint_length_days=state.sprint_length or 10,
+        collection_manifest=manifest,
+    )
+
+
+def _observations_as_messages(rows: Iterable[Any]) -> list[StandupMessage]:
+    return [
+        StandupMessage(
+            engineer_id=o.engineer_id,
+            date_iso=o.run_date.isoformat(),
+            raw=o.raw,
+            chat_message_id=o.chat_message_id,
+        )
+        for o in rows
+    ]
 
 
 # ---------- helpers ----------
@@ -178,7 +312,10 @@ def _resolve_people(ticket: JiraTicket, ctx: RunContext) -> JiraTicket:
 
 
 async def _discover_projects(
-    team: TeamConfig, run_date_iso: str, notes: list[str]
+    team: TeamConfig,
+    run_date_iso: str,
+    notes: list[str],
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[list[str], bool]:
     """Resolve the team's GitLab projects: every project under each configured group.
 
@@ -186,7 +323,20 @@ async def _discover_projects(
     came from `config/gitlab_projects.yaml` instead of live group discovery
     (because `team.gitlab_groups` is empty, or every discovery call came back
     empty).
+
+    When `conn` is given and the discovery registry (`gitlab_projects`,
+    populated by the startup discovery pass) is non-empty, those persisted paths
+    are used directly — no live GitLab call. The registry is the source of truth
+    once warmed; live discovery is the cold-start / no-registry fallback.
     """
+    if conn is not None:
+        from tl_agent.storage.repos import gitlab_projects
+
+        cached = gitlab_projects.active_paths(conn)
+        if cached:
+            logger.debug("phase1.gitlab_discovery_registry", extra={"projects": cached})
+            return cached, False
+
     if not team.gitlab_groups:
         fallback = sorted(load_allowed_gitlab_projects())
         logger.debug(
@@ -236,7 +386,7 @@ async def _discover_projects(
 async def _fetch_commits(
     ctx: RunContext, since: datetime, until: datetime
 ) -> tuple[list[GitCommit], CollectionManifest]:
-    return await fetch_commits(ctx.team, since, until, ctx.run_date_iso, ctx.notes)
+    return await fetch_commits(ctx.team, since, until, ctx.run_date_iso, ctx.notes, conn=ctx.sqlite)
 
 
 async def fetch_commits(
@@ -245,6 +395,7 @@ async def fetch_commits(
     until: datetime,
     run_date_iso: str,
     notes: list[str],
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[list[GitCommit], CollectionManifest]:
     """Pull every commit in each team GitLab project, then attribute by author.
 
@@ -263,7 +414,7 @@ async def fetch_commits(
     `team.gitlab_groups` (config/team.md → Repo scope);
     `config/gitlab_projects.yaml` is the fallback when no group is configured.
     """
-    projects, used_fallback = await _discover_projects(team, run_date_iso, notes)
+    projects, used_fallback = await _discover_projects(team, run_date_iso, notes, conn)
     engineer_ids = {e.id for e in team.engineers}
     tool = ListCommitsTool()
 

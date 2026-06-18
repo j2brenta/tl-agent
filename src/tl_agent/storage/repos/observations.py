@@ -73,6 +73,25 @@ def get(conn: sqlite3.Connection, *, run_date: date, engineer_id: str) -> Stored
     )
 
 
+def list_for_date(conn: sqlite3.Connection, run_date: date) -> list[StoredObservation]:
+    """Every stored standup observation for one day, ordered by engineer."""
+    rows = conn.execute(
+        "SELECT * FROM standup_observations WHERE run_date = ? ORDER BY engineer_id",
+        (run_date.isoformat(),),
+    ).fetchall()
+    return [
+        StoredObservation(
+            id=r["id"],
+            run_date=date.fromisoformat(r["run_date"]),
+            engineer_id=r["engineer_id"],
+            raw=r["raw"],
+            summary=r["summary"],
+            chat_message_id=r["chat_message_id"],
+        )
+        for r in rows
+    ]
+
+
 def search(
     conn: sqlite3.Connection,
     *,

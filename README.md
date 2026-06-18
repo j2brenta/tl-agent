@@ -236,6 +236,15 @@ FastAPI + HTMX. Phase 8 is a 4-button surface — a React app would be overkill
 and would hide the markup. Templates are in `src/tl_agent/web/templates/`,
 loaded via Jinja2, swapped inline via HTMX.
 
+The nav is grouped into **Workflow** (Workflow, Sprint, Brief, Decisions,
+Gitlab) and **Config** (Team). A global, cookie-backed **run-day** selector in
+the sidebar makes every tab stick to the same day, and lets you run for past
+days. Collection is persisted locally: project **discovery** runs in the
+background on startup into a registry the **Gitlab** tab reads instantly;
+**Collect Jira** / **Collect GitLab** refresh from the services and update the
+local cache; and **Run now** asks whether to *collect fresh* or *reuse stored*
+data for the chosen day.
+
 ### Idempotency via SQLite, not Redis
 
 The dedup load is one row per writer call per day. SQLite covers it; adding

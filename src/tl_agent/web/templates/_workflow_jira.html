@@ -1,20 +1,24 @@
-{# HTMX fragment: one-shot raw pull of Jira sprint tickets + GitLab commits. #}
+{# HTMX fragment: Jira sprint tickets (cached on page load, refreshed on Collect). #}
 {% set status_badge = {
   "todo": "gray", "in_progress": "blue", "in_review": "purple",
   "done": "green", "blocked": "red"} %}
 
-<div class="card" style="margin-bottom:16px">
+<div id="workflow-jira-card" class="card" style="margin-bottom:16px">
   <div class="section-label">
     Jira — sprint {{ sprint_id or "?" }}
     <span style="color:var(--text-faint);font-weight:400">· {{ rows | length }} tickets</span>
     {% if missing_count %}<span class="badge badge-amber" style="margin-left:6px">⚠ {{ missing_count }} unassigned</span>{% endif %}
     {% if unknown_count %}<span class="badge badge-amber" style="margin-left:6px">⚠ {{ unknown_count }} off-team</span>{% endif %}
+    <span style="color:var(--text-faint);font-weight:400;font-size:11px;margin-left:6px">
+      {% if collected_at %}cached · collected <time datetime="{{ collected_at }}">{{ collected_at[:16].replace('T',' ') }}</time> UTC
+      {% elif not jira_err %}from storage{% endif %}
+    </span>
   </div>
 
   {% if jira_err %}
   <div class="banner banner-warn"><span>⚠</span><span>Jira fetch failed: {{ jira_err }}</span></div>
   {% elif not rows %}
-  <div style="font-size:13px;color:var(--text-muted)">No tickets in the sprint.</div>
+  <div style="font-size:13px;color:var(--text-muted)">No tickets collected for {{ selected_date }}. Click “Collect Jira only”.</div>
   {% else %}
   <table>
     <thead>
@@ -42,5 +46,3 @@
   </table>
   {% endif %}
 </div>
-
-{% include "_workflow_gitlab.html" %}

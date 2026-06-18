@@ -1,0 +1,89 @@
+{# Refreshable body of the Gitlab tab: cached summary + per-project accordions. #}
+<div id="gitlab-content">
+  {% if error %}
+  <div class="banner banner-warn"><span>⚠</span><span>GitLab fetch issues: {{ error }}</span></div>
+  {% endif %}
+
+  <div class="card">
+    <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;align-items:flex-end">
+      <div>
+        <div style="color:var(--text-faint);font-size:11px">Projects (registry)</div>
+        <strong>{{ projects | length }}</strong>
+      </div>
+      <div>
+        <div style="color:var(--text-faint);font-size:11px">Team commits ({{ selected_date }})</div>
+        <strong>{{ team_commit_count }}</strong>
+      </div>
+      <div>
+        <div style="color:var(--text-faint);font-size:11px">Unconfigured contributors</div>
+        <strong{% if manifest and manifest.unconfigured_authors %} style="color:var(--red)"{% endif %}>
+          {{ (manifest.unconfigured_authors | length) if manifest else 0 }}
+        </strong>
+      </div>
+      <div style="margin-left:auto;color:var(--text-faint);font-size:11px">
+        {% if gitlab_collected_at %}
+          last refreshed <time datetime="{{ gitlab_collected_at }}">{{ gitlab_collected_at[:16].replace('T',' ') }}</time> UTC
+        {% else %}
+          not yet collected for this day
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">Projects</div>
+  {% if not projects %}
+  <div class="card" style="font-size:13px;color:var(--text-muted)">
+    No projects discovered yet. Discovery runs in the background on startup; reload in a moment.
+  </div>
+  {% else %}
+    {% for p in projects %}
+    <details class="card" style="padding:0">
+      <summary style="padding:12px 20px;list-style:none;display:flex;align-items:center;gap:10px">
+        <code>{{ p.path }}</code>
+        {% if p.group_path %}<span class="badge badge-gray">{{ p.group_path }}</span>{% endif %}
+        <span style="margin-left:auto;color:var(--text-faint);font-size:12px">
+          {{ p.commits | length }} commit{{ '' if (p.commits | length) == 1 else 's' }}
+        </span>
+      </summary>
+      <div style="padding:0 20px 14px">
+        {% if not p.commits %}
+        <div style="font-size:13px;color:var(--text-muted)">No commits cached for {{ selected_date }}.</div>
+        {% else %}
+        <table>
+          <thead><tr><th>SHA</th><th>Author</th><th>When</th><th>Message</th></tr></thead>
+          <tbody>
+            {% for c in p.commits %}
+            <tr>
+              <td style="font-family:var(--mono);color:var(--text-faint)">{{ c.sha[:8] }}</td>
+              <td>{{ c.author }}</td>
+              <td><time datetime="{{ c.committed_at.isoformat() }}">{{ c.committed_at.isoformat()[:16].replace('T',' ') }}</time></td>
+              <td>{{ c.message.splitlines()[0] if c.message else "" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  {% endif %}
+
+  {% if manifest and manifest.unconfigured_authors %}
+  <div class="card">
+    <div class="section-label">Unconfigured contributors</div>
+    <table>
+      <thead><tr><th>Author</th><th>Project</th><th>Commits</th><th>Sample commit</th></tr></thead>
+      <tbody>
+        {% for a in manifest.unconfigured_authors %}
+        <tr>
+          <td><span class="badge badge-amber">⚠ {{ a.author }}</span></td>
+          <td><code>{{ a.project }}</code></td>
+          <td>{{ a.commit_count }}</td>
+          <td style="font-family:var(--mono);color:var(--text-faint)">{{ a.sample_sha[:8] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

@@ -75,6 +75,19 @@ def list_for_engineer_date(
     return [_row_to_segment(r) for r in rows]
 
 
+def list_for_date(conn: sqlite3.Connection, date_iso: str) -> list[StandupSegment]:
+    """All segments classified on one day, ordered for display."""
+    rows = conn.execute(
+        """
+        SELECT * FROM standup_segments
+        WHERE date_iso = ?
+        ORDER BY engineer_id, chat_message_id, segment_index
+        """,
+        (date_iso,),
+    ).fetchall()
+    return [_row_to_segment(r) for r in rows]
+
+
 def _row_to_segment(row: sqlite3.Row) -> StandupSegment:
     return StandupSegment(
         engineer_id=row["engineer_id"],

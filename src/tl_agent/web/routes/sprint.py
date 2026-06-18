@@ -11,7 +11,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -22,6 +22,7 @@ from tl_agent.storage.repos import flags as flags_repo
 from tl_agent.storage.repos import observations as obs_repo
 from tl_agent.storage.repos import snapshots as snapshots_repo
 from tl_agent.storage.repos import standup_segments as segments_repo
+from tl_agent.web import _dates
 
 router = APIRouter()
 
@@ -52,9 +53,9 @@ def _validate_date(raw: str | None) -> str | None:
 
 
 @router.get("/sprint", response_class=HTMLResponse)
-async def sprint(date: str | None = None) -> HTMLResponse:
+async def sprint(request: Request, date: str | None = None) -> HTMLResponse:
     conn = _conn()
-    selected = _validate_date(date)
+    selected = _validate_date(date) or _dates.cookie_date(request)
     available = _list_snapshot_dates(conn)
 
     if selected is None and available:
@@ -130,7 +131,7 @@ async def sprint(date: str | None = None) -> HTMLResponse:
     # Unplanned / mid-sprint additions: tickets added_to_sprint_at set
     unplanned_tickets = [t for t in tickets if t.added_to_sprint_at is not None]
 
-    return HTMLResponse(
+    response = HTMLResponse(
         template.render(
             selected_date=selected,
             available_dates=available,
@@ -149,6 +150,8 @@ async def sprint(date: str | None = None) -> HTMLResponse:
             no_data=False,
         )
     )
+    _dates.set_date_cookie(response, selected)
+    return response
 
 
 def _date_from_iso(s: str) -> date:

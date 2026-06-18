@@ -1,0 +1,37 @@
+{# Inline collect-or-reuse prompt, shown when "Run now" is clicked. #}
+<div id="workflow-runzone" class="card" style="border-color:var(--blue)">
+  <div class="section-label">Run the morning loop · {{ selected_date }}</div>
+  <div style="font-size:13px;margin-bottom:12px">
+    Cached data for this day:
+    <ul style="margin:6px 0 0 18px;line-height:1.7">
+      <li>Jira:
+        {% if jira_collected_at %}
+          <strong>{{ tickets_count }}</strong> tickets
+          <span style="color:var(--text-faint)">· collected <time datetime="{{ jira_collected_at }}">{{ jira_collected_at[:16].replace('T',' ') }}</time> UTC</span>
+        {% else %}<span style="color:var(--text-muted)">not collected</span>{% endif %}
+      </li>
+      <li>GitLab:
+        {% if gitlab_collected_at %}
+          <strong>{{ commits_count }}</strong> commits
+          <span style="color:var(--text-faint)">· collected <time datetime="{{ gitlab_collected_at }}">{{ gitlab_collected_at[:16].replace('T',' ') }}</time> UTC</span>
+        {% else %}<span style="color:var(--text-muted)">not collected</span>{% endif %}
+      </li>
+    </ul>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <form hx-post="/workflow/run" hx-target="#workflow-content" hx-swap="outerHTML">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <input type="hidden" name="reuse" value="false">
+      <button type="submit" class="btn-import">▶ Collect fresh &amp; run</button>
+    </form>
+    {% if has_cache %}
+    <form hx-post="/workflow/run" hx-target="#workflow-content" hx-swap="outerHTML">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <input type="hidden" name="reuse" value="true">
+      <button type="submit">♻ Reuse stored &amp; run</button>
+    </form>
+    {% else %}
+    <span style="font-size:12px;color:var(--text-faint)">Nothing stored yet — collect first to enable reuse.</span>
+    {% endif %}
+  </div>
+</div>

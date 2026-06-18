@@ -22,8 +22,10 @@ that gives the stronger senior signal even if it's more work.
 - **Domain models:** `src/tl_agent/models/` — every contract is Pydantic;
   changes here ripple everywhere; bump tests in `tests/unit/test_models.py`
 - **Storage:** `src/tl_agent/storage/{schema.sql, db.py, repos/*}` —
-  8 SQLite tables, FTS5 on standup_observations, transactions via the
-  `transaction()` ctx manager
+  SQLite tables (schema_version 2), FTS5 on standup_observations, transactions
+  via the `transaction()` ctx manager. Collection-cache tables:
+  `gitlab_projects` (discovery registry), `collected_commits` (per-date commit
+  cache), `collection_state` (per-date "what's cached" + sprint meta + manifest)
 - **Working context / memory tiers:** `src/tl_agent/storage/working_context.py`
 - **Markdown config (LAYER 1):** `config/{team,ownership,escalation,tl_preferences,router}.md|yaml`
 - **Tool contract:** `src/tl_agent/tools/base.py` — every tool subclasses
@@ -44,10 +46,20 @@ that gives the stronger senior signal even if it's more work.
   tool transcript; the `check_success_claim` detector is the "confidently
   lied" guard
 - **Stop conditions:** `src/tl_agent/agent/stop_conditions.py` — named enum
-- **Phases:** `src/tl_agent/phases/{orchestrator, phase0…phase8}.py`
+- **Phases:** `src/tl_agent/phases/{orchestrator, phase0…phase8}.py`.
+  `phases/discovery.py` is the background GitLab-project discovery pass (run on
+  web startup, persists the `gitlab_projects` registry). `phase1_collect.run`
+  persists its collection and, when `ctx.reuse_cached`, rebuilds `DailySignals`
+  from storage instead of fetching (`orchestrator.run(..., reuse_cached=)`).
 - **Prompts (versioned):** `prompts/<phase>/v1.md` + per-phase READMEs
   (the evolution log)
-- **Web UI:** `src/tl_agent/web/{app,routes,templates}/*` — FastAPI + HTMX
+- **Web UI:** `src/tl_agent/web/{app,routes,templates}/*` — FastAPI + HTMX.
+  Nav is grouped Workflow (Workflow, Sprint, Brief, Decisions, Gitlab) + Config
+  (Team). `web/_dates.py` centralizes the global cookie-backed run-day
+  (`?date=` → `tl_run_date` cookie → today). `routes/gitlab.py` is the
+  registry-driven Gitlab tab (was Discovery). Workflow has separate
+  Collect-Jira / Collect-GitLab persisted refreshes and a Run-now
+  collect-or-reuse prompt (`/workflow/run_prompt`, `reuse` form field).
 - **Eval harness:** `evals/{failure_taxonomy,runner,replay,cases/*.yaml}`
 - **Compose stack:** `infra/docker-compose.yml`, `services/jira_mock/`,
   `services/mattermost_seed/`, `infra/{gitlab,mattermost}/`

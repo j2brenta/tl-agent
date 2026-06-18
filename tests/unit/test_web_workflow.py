@@ -124,10 +124,12 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     initialize(conn)
     conn.close()
 
-    scheduled: list[tuple[str, str | None]] = []
+    scheduled: list[tuple[str, str | None, bool]] = []
 
-    def _fake_schedule(run_date: date, sprint_id: str | None = None) -> None:
-        scheduled.append((run_date.isoformat(), sprint_id))
+    def _fake_schedule(
+        run_date: date, sprint_id: str | None = None, *, reuse_cached: bool = False
+    ) -> None:
+        scheduled.append((run_date.isoformat(), sprint_id, reuse_cached))
 
     monkeypatch.setattr(wf, "_schedule_run", _fake_schedule)
 
@@ -183,7 +185,13 @@ def test_fragment_shows_picker_for_awaiting_run(client: TestClient, tmp_path: Pa
 def test_run_trigger_schedules_when_idle(client: TestClient) -> None:
     r = client.post("/workflow/run", data={"date": "2026-05-22"})
     assert r.status_code == 200
-    assert client.scheduled == [("2026-05-22", None)]  # type: ignore[attr-defined]
+    assert client.scheduled == [("2026-05-22", None, False)]  # type: ignore[attr-defined]
+
+
+def test_run_trigger_reuse_passes_flag(client: TestClient) -> None:
+    r = client.post("/workflow/run", data={"date": "2026-05-22", "reuse": "true"})
+    assert r.status_code == 200
+    assert client.scheduled == [("2026-05-22", None, True)]  # type: ignore[attr-defined]
 
 
 def test_run_trigger_skips_when_in_progress(client: TestClient, tmp_path: Path) -> None:
@@ -217,7 +225,7 @@ def test_resolve_marks_resolved_and_reschedules(client: TestClient, tmp_path: Pa
         "/workflow/sprint/resolve", data={"run_id": "run-await", "sprint_id": "S-2026-05"}
     )
     assert r.status_code == 200
-    assert client.scheduled == [("2026-05-22", "S-2026-05")]  # type: ignore[attr-defined]
+    assert client.scheduled == [("2026-05-22", "S-2026-05", False)]  # type: ignore[attr-defined]
 
     conn = connect(Path(db))
     row = conn.execute("SELECT status, notes FROM runs WHERE id = 'run-await'").fetchone()
@@ -258,59 +266,51 @@ def test_ticket_rows_flag_missing_and_unknown() -> None:
     assert by_key["ENG-3"]["unknown"] is True and by_key["ENG-3"]["assignee"] == "ghost"
 
 
-def test_collect_route_renders_tickets_and_commits(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def _fake_jira(selected: str) -> tuple[str | None, list[JiraTicket], str | None]:
-        return "S-2026-05", [_ticket("ENG-1", "john"), _ticket("ENG-9", None)], None
+def _commit() -> GitCommit:
+    return GitCommit(
+        sha="abcdef1234567",
+        project="tl-agent/demo",
+        author="john",
+        committed_at=datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
+        message="fix publisher retry [ENG-1]",
+        files_changed=2,
+        insertions=10,
+        deletions=3,
+        linked_ticket_keys=("ENG-1",),
+    )
 
-    async def _fake_gitlab(
-        selected: str, since: datetime, until: datetime
-    ) -> tuple[list[GitCommit], str | None]:
-        commit = GitCommit(
-            sha="abcdef1234567",
-            project="tl-agent/demo",
-            author="john",
-            committed_at=datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
-            message="fix publisher retry [ENG-1]",
-            files_changed=2,
-            insertions=10,
-            deletions=3,
-            linked_ticket_keys=("ENG-1",),
+
+def test_collect_jira_route_renders_and_persists_tickets(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def _fake_jira(selected: str) -> wf._JiraPull:
+        return wf._JiraPull(
+            "S-2026-05", [_ticket("ENG-1", "john"), _ticket("ENG-9", None)], None, 3, 10
         )
-        return [commit], None
 
     monkeypatch.setattr(wf, "_collect_jira", _fake_jira)
-    monkeypatch.setattr(wf, "_collect_gitlab", _fake_gitlab)
 
-    r = client.post("/workflow/collect", data={"date": "2026-05-22"})
+    r = client.post("/workflow/collect_jira", data={"date": "2026-05-22"})
     assert r.status_code == 200
     assert "S-2026-05" in r.text
     assert "ENG-1" in r.text and "ENG-9" in r.text
     assert "⚠ 1 unassigned" in r.text  # ENG-9 has no assignee
-    assert "unassigned" in r.text
-    assert "fix publisher retry" in r.text  # commit message line
-    assert "abcdef12" in r.text  # short sha
+
+    # Persisted: a later cached fragment shows the same tickets, no fetch.
+    r2 = client.get("/workflow/jira_fragment?date=2026-05-22")
+    assert r2.status_code == 200
+    assert "ENG-1" in r2.text and "S-2026-05" in r2.text
 
 
-def test_collect_gitlab_route_renders_commits_only(
+def test_collect_gitlab_route_renders_and_persists_commits(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from tl_agent.models import CollectionManifest
+
     async def _fake_gitlab(
         selected: str, since: datetime, until: datetime
-    ) -> tuple[list[GitCommit], str | None]:
-        commit = GitCommit(
-            sha="abcdef1234567",
-            project="tl-agent/demo",
-            author="john",
-            committed_at=datetime(2026, 5, 22, 9, 30, tzinfo=UTC),
-            message="fix publisher retry [ENG-1]",
-            files_changed=2,
-            insertions=10,
-            deletions=3,
-            linked_ticket_keys=("ENG-1",),
-        )
-        return [commit], None
+    ) -> tuple[list[GitCommit], CollectionManifest, str | None]:
+        return [_commit()], CollectionManifest(gitlab_groups=("tl-agent",)), None
 
     monkeypatch.setattr(wf, "_collect_gitlab", _fake_gitlab)
 
@@ -319,16 +319,22 @@ def test_collect_gitlab_route_renders_commits_only(
     assert "GitLab — commits" in r.text
     assert "fix publisher retry" in r.text
     assert "abcdef12" in r.text
-    assert "Jira" not in r.text
+
+    # Persisted: the cached fragment shows the commit without a fetch.
+    r2 = client.get("/workflow/gitlab_fragment?date=2026-05-22")
+    assert r2.status_code == 200
+    assert "abcdef12" in r2.text
 
 
 def test_collect_gitlab_route_shows_error(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from tl_agent.models import CollectionManifest
+
     async def _fake_gitlab(
         selected: str, since: datetime, until: datetime
-    ) -> tuple[list[GitCommit], str | None]:
-        return [], "gitlab project discovery failed for group 'tl-agent'"
+    ) -> tuple[list[GitCommit], CollectionManifest, str | None]:
+        return [], CollectionManifest(), "gitlab project discovery failed for group 'tl-agent'"
 
     monkeypatch.setattr(wf, "_collect_gitlab", _fake_gitlab)
 
@@ -336,6 +342,27 @@ def test_collect_gitlab_route_shows_error(
     assert r.status_code == 200
     assert "GitLab fetch failed" in r.text
     assert "discovery failed" in r.text
+
+
+def test_run_prompt_reflects_cache_state(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Nothing cached yet → only "Collect fresh", reuse disabled.
+    r = client.get("/workflow/run_prompt?date=2026-05-22")
+    assert r.status_code == 200
+    assert "Collect fresh" in r.text
+    assert "Reuse stored" not in r.text
+
+    # Collect Jira, then the prompt offers reuse.
+    async def _fake_jira(selected: str) -> wf._JiraPull:
+        return wf._JiraPull("S-2026-05", [_ticket("ENG-1", "john")], None, 3, 10)
+
+    monkeypatch.setattr(wf, "_collect_jira", _fake_jira)
+    client.post("/workflow/collect_jira", data={"date": "2026-05-22"})
+
+    r2 = client.get("/workflow/run_prompt?date=2026-05-22")
+    assert "Reuse stored" in r2.text
+    assert "1" in r2.text  # tickets count
 
 
 # -------------------- standup collect + parse --------------------

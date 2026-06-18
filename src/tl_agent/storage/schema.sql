@@ -205,5 +205,54 @@ CREATE TABLE IF NOT EXISTS resolved_config (
     updated_at TEXT NOT NULL          -- RFC3339, when it was last resolved
 );
 
+-- ---------- gitlab_projects ----------
+-- Registry of GitLab projects discovered under the team's configured groups.
+-- Populated by a background discovery task on web startup (and refreshed each
+-- startup), so the Gitlab tab can list "projects we already know about"
+-- instantly without a live GitLab call. Not keyed by date — this is the
+-- current shape of the world, diffed on each discovery pass (`removed` flips to
+-- 1 when a path is no longer returned for its group).
+CREATE TABLE IF NOT EXISTS gitlab_projects (
+    path       TEXT PRIMARY KEY,        -- path_with_namespace
+    group_path TEXT NOT NULL,           -- the configured group it was found under ('' = fallback)
+    first_seen TEXT NOT NULL,           -- RFC3339, when first discovered
+    last_seen  TEXT NOT NULL,           -- RFC3339, last discovery pass that saw it
+    removed    INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS gitlab_projects_by_group ON gitlab_projects(group_path);
+
+-- ---------- collected_commits ----------
+-- Per-date cache of every commit pulled in the GitLab collection window for a
+-- run_date. Lets the Gitlab tab and a "reuse stored" run read commits back
+-- without re-hitting GitLab. Refreshed (delete-then-insert for the date) when
+-- the user collects again.
+CREATE TABLE IF NOT EXISTS collected_commits (
+    run_date     TEXT NOT NULL,         -- YYYY-MM-DD
+    project      TEXT NOT NULL,
+    sha          TEXT NOT NULL,
+    author       TEXT NOT NULL,
+    committed_at TEXT NOT NULL,         -- RFC3339
+    payload      TEXT NOT NULL,         -- JSON: full GitCommit
+    PRIMARY KEY (run_date, project, sha)
+);
+CREATE INDEX IF NOT EXISTS collected_commits_by_date ON collected_commits(run_date);
+
+-- ---------- collection_state ----------
+-- One row per run_date describing what's been collected and cached. Drives the
+-- Run-now "what's cached" summary, and the sprint columns let a "reuse stored"
+-- run rebuild DailySignals without a Jira call. `manifest_json` is the
+-- serialized CollectionManifest (project coverage + unconfigured authors).
+CREATE TABLE IF NOT EXISTS collection_state (
+    run_date           TEXT PRIMARY KEY,   -- YYYY-MM-DD
+    jira_collected_at  TEXT,               -- RFC3339, NULL until Jira collected
+    gitlab_collected_at TEXT,              -- RFC3339, NULL until GitLab collected
+    sprint_id          TEXT,
+    sprint_day         INTEGER,
+    sprint_length      INTEGER,
+    tickets_count      INTEGER,
+    commits_count      INTEGER,
+    manifest_json      TEXT                -- JSON: CollectionManifest
+);
+
 -- ---------- schema_meta seed ----------
-INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1');
+INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '2');

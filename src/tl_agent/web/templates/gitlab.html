@@ -1,0 +1,43 @@
+{% extends "_base.html" %}
+{% block title %}Gitlab{% endblock %}
+{% block nav_gitlab %}active{% endblock %}
+
+{% block page_data %}
+<script>
+  window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
+  window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+</script>
+<style>
+  #gitlab-refresh-spin { display:none;font-size:12px;color:var(--text-faint) }
+  #gitlab-refresh-spin.htmx-request { display:block }
+  details.card > summary::-webkit-details-marker { display:none }
+  details.card > summary { cursor:pointer }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page-header">
+  <h1>Gitlab <span class="sprint-name">projects &amp; commits · {{ selected_date }}</span></h1>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+    <span id="gitlab-refresh-spin">Refreshing from GitLab…</span>
+    <form hx-post="/gitlab/refresh" hx-target="#gitlab-content" hx-swap="outerHTML"
+          hx-indicator="#gitlab-refresh-spin">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <button type="submit" class="btn-import">⟳ Refresh from GitLab</button>
+    </form>
+  </div>
+</div>
+
+<div class="banner banner-warn">
+  <span>⚠</span>
+  <span>
+    Projects come from the discovery registry (refreshed in the background on
+    startup). Commits shown are the per-day cache; an author that doesn't resolve
+    to anyone in <code>config/team.md</code> appears under
+    <strong>Unconfigured contributors</strong>. Use <strong>Refresh from GitLab</strong>
+    to re-pull the window and update the cache.
+  </span>
+</div>
+
+{% include "_gitlab_fragment.html" %}
+{% endblock %}

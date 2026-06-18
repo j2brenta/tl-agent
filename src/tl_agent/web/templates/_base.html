@@ -142,6 +142,52 @@
 
     .nav-icon { font-size: 14px; width: 16px; text-align: center; }
 
+    .nav-group-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #475569;
+      padding: 10px 10px 4px;
+    }
+    .nav-group-label:first-child { padding-top: 2px; }
+    .nav-group-divider {
+      height: 1px;
+      background: var(--sidebar-border);
+      margin: 10px 8px;
+    }
+
+    /* ── Run-day selector ── */
+    .run-day {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 8px;
+    }
+    .run-day-input {
+      flex: 1;
+      min-width: 0;
+      padding: 4px 6px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--sidebar-border);
+      background: var(--sidebar-hover);
+      color: var(--sidebar-text-bright);
+      font-family: var(--mono);
+      font-size: 12px;
+      color-scheme: dark;
+    }
+    .run-day-arrow {
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--sidebar-border);
+      background: var(--sidebar-hover);
+      color: var(--sidebar-text-bright);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .run-day-arrow:hover { background: var(--sidebar-active); }
+
     .sidebar-section {
       padding: 16px 8px 8px;
       flex: 1;
@@ -422,31 +468,42 @@
       </div>
 
       <nav class="sidebar-nav">
-        <a href="/sprint"    class="nav-link {% block nav_sprint    %}{% endblock %}">
+        <div class="nav-group-label">Workflow</div>
+        <a href="/workflow"  class="nav-link {% block nav_workflow  %}{% endblock %}" data-keepdate>
+          <span class="nav-icon">⟿</span> Workflow
+        </a>
+        <a href="/sprint"    class="nav-link {% block nav_sprint    %}{% endblock %}" data-keepdate>
           <span class="nav-icon">◈</span> Sprint
         </a>
-        <a href="/brief"     class="nav-link {% block nav_brief     %}{% endblock %}">
+        <a href="/brief"     class="nav-link {% block nav_brief     %}{% endblock %}" data-keepdate>
           <span class="nav-icon">◇</span> Brief
         </a>
-        <a href="/decisions" class="nav-link {% block nav_decisions %}{% endblock %}">
+        <a href="/decisions" class="nav-link {% block nav_decisions %}{% endblock %}" data-keepdate>
           <span class="nav-icon">◉</span> Decisions
         </a>
+        <a href="/gitlab"    class="nav-link {% block nav_gitlab    %}{% endblock %}" data-keepdate>
+          <span class="nav-icon">⎇</span> Gitlab
+        </a>
+
+        <div class="nav-group-label">Config</div>
         <a href="/team"      class="nav-link {% block nav_team      %}{% endblock %}">
           <span class="nav-icon">◌</span> Team
         </a>
-        <a href="/workflow"  class="nav-link {% block nav_workflow  %}{% endblock %}">
-          <span class="nav-icon">⟿</span> Workflow
-        </a>
-        <a href="/discovery" class="nav-link {% block nav_discovery %}{% endblock %}">
-          <span class="nav-icon">⌖</span> Discovery
-        </a>
+
+        <div class="nav-group-divider"></div>
         <a href="http://localhost:6006" target="_blank" class="nav-link">
           <span class="nav-icon">↗</span> Traces
         </a>
       </nav>
 
       <div class="sidebar-section">
-        <div class="sidebar-label">Recent days</div>
+        <div class="sidebar-label">Run day</div>
+        <div class="run-day">
+          <button type="button" class="run-day-arrow" id="run-day-prev" title="Previous day">‹</button>
+          <input type="date" id="run-day-input" class="run-day-input">
+          <button type="button" class="run-day-arrow" id="run-day-next" title="Next day">›</button>
+        </div>
+        <div class="sidebar-label" style="margin-top:16px">Recent days</div>
         <div class="date-chips" id="date-timeline"></div>
       </div>
     </aside>
@@ -504,6 +561,45 @@
           + '</a>';
       }
       chips.innerHTML = html;
+    })();
+
+    // Global sticky run-day: input + arrows drive ?date=; persist in a cookie
+    // so it survives tab navigation; carry it on nav links for immediacy.
+    (function() {
+      var path = window.location.pathname;
+      function readCookie(name) {
+        var m = document.cookie.match("(?:^|; )" + name + "=([^;]*)");
+        return m ? decodeURIComponent(m[1]) : "";
+      }
+      var selected = window.TL_SELECTED_DATE || readCookie("tl_run_date")
+                     || new Date().toISOString().slice(0,10);
+
+      // Persist the active day (server also sets it when ?date is explicit).
+      document.cookie = "tl_run_date=" + selected + ";path=/;max-age=" + (60*60*24*30) + ";samesite=lax";
+
+      function go(iso) { window.location.href = path + "?date=" + iso; }
+      function shift(iso, days) {
+        var d = new Date(iso + "T00:00:00");
+        d.setDate(d.getDate() + days);
+        var pad = function(n) { return String(n).padStart(2,"0"); };
+        return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+      }
+
+      var input = document.getElementById("run-day-input");
+      if (input) {
+        input.value = selected;
+        input.addEventListener("change", function() { if (input.value) go(input.value); });
+      }
+      var prev = document.getElementById("run-day-prev");
+      var next = document.getElementById("run-day-next");
+      if (prev) prev.addEventListener("click", function() { go(shift(selected, -1)); });
+      if (next) next.addEventListener("click", function() { go(shift(selected, 1)); });
+
+      // Keep the selected day across tab navigation.
+      document.querySelectorAll("a.nav-link[data-keepdate]").forEach(function(a) {
+        var href = a.getAttribute("href");
+        if (href && href.indexOf("?") === -1) a.setAttribute("href", href + "?date=" + selected);
+      });
     })();
   </script>
 </body>

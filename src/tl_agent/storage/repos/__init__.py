@@ -2,8 +2,11 @@
 
 from tl_agent.storage.repos import (
     baselines,
+    collection_state,
+    commits,
     decisions,
     flags,
+    gitlab_projects,
     observations,
     predictions,
     resolved_config,
@@ -13,8 +16,11 @@ from tl_agent.storage.repos import (
 
 __all__ = [
     "baselines",
+    "collection_state",
+    "commits",
     "decisions",
     "flags",
+    "gitlab_projects",
     "observations",
     "predictions",
     "resolved_config",

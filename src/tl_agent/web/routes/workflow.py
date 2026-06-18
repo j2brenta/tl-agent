@@ -3,11 +3,16 @@
 Routes:
   GET  /workflow                  — full page (milestones for the selected date)
   GET  /workflow/fragment         — HTMX fragment, self-polls while a run is live
-  POST /workflow/run              — kick off the pipeline for a date (background)
+  GET  /workflow/run_prompt       — collect-or-reuse panel for "Run now"
+  POST /workflow/run              — kick off the pipeline for a date (background);
+                                    `reuse` reuses locally-cached collection
   POST /workflow/sprint/resolve   — resolve an `awaiting_sprint` run by picking
                                     a sprint; relaunches the run with that choice
-  POST /workflow/collect          — one-shot raw pull of Jira sprint tickets +
-                                    GitLab commits (no pipeline), for inspection
+  GET  /workflow/jira_fragment    — cached Jira tickets for the day (page load)
+  POST /workflow/collect_jira     — refresh Jira tickets from the service + persist
+  GET  /workflow/gitlab_fragment  — cached GitLab commits for the day (page load)
+  POST /workflow/collect_gitlab   — refresh GitLab commits from the service + persist
+  POST /workflow/collect_standup  — fetch + segment today's standup (cached)
 
 The milestone view is a friendly projection of the `runs` table
 (`notes.phases` + `notes.signals` + `notes.sprint_decision`) — the same data the
@@ -26,11 +31,12 @@ from datetime import date as date_
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Form
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from tl_agent.models import GitCommit, JiraTicket
+from tl_agent.web import _dates
 
 logger = logging.getLogger(__name__)
 
@@ -194,13 +200,15 @@ def _coerce_date(date: str | None) -> str:
 
 
 @router.get("/workflow", response_class=HTMLResponse)
-async def workflow(date: str | None = None) -> HTMLResponse:
-    selected = _coerce_date(date)
+async def workflow(request: Request, date: str | None = None) -> HTMLResponse:
+    selected = _dates.resolve_date(request, date)
     conn = _conn()
     template = _env.get_template("workflow.html")
-    return HTMLResponse(
+    response = HTMLResponse(
         template.render(selected_date=selected, available_dates=_available_dates(conn))
     )
+    _dates.set_date_cookie(response, selected)
+    return response
 
 
 @router.get("/workflow/fragment", response_class=HTMLResponse)
@@ -212,14 +220,16 @@ async def workflow_fragment(date: str | None = None) -> HTMLResponse:
 _BG_TASKS: set[asyncio.Task[None]] = set()
 
 
-def _schedule_run(run_date: date_, sprint_id: str | None = None) -> None:
+def _schedule_run(
+    run_date: date_, sprint_id: str | None = None, *, reuse_cached: bool = False
+) -> None:
     """Fire-and-forget the pipeline on the running event loop."""
 
     async def _bg() -> None:
         from tl_agent.phases.orchestrator import run as orch_run
 
         try:
-            await orch_run(run_date, sprint_id=sprint_id)
+            await orch_run(run_date, sprint_id=sprint_id, reuse_cached=reuse_cached)
         except Exception:
             # Background task: log, never crash the event loop.
             logger.exception("workflow background run failed (date=%s)", run_date.isoformat())
@@ -229,16 +239,41 @@ def _schedule_run(run_date: date_, sprint_id: str | None = None) -> None:
     task.add_done_callback(_BG_TASKS.discard)
 
 
-@router.post("/workflow/run", response_class=HTMLResponse)
-async def workflow_run(date: str | None = Form(None)) -> HTMLResponse:
+@router.get("/workflow/run_prompt", response_class=HTMLResponse)
+async def workflow_run_prompt(date: str | None = None) -> HTMLResponse:
+    """The collect-or-reuse panel: summarizes what's cached for the day."""
+    from tl_agent.storage.repos import collection_state
+
     selected = _coerce_date(date)
+    conn = _conn()
+    try:
+        state = collection_state.get(conn, date_.fromisoformat(selected))
+    finally:
+        conn.close()
+    template = _env.get_template("_workflow_run_prompt.html")
+    return HTMLResponse(
+        template.render(
+            selected_date=selected,
+            jira_collected_at=state.jira_collected_at if state else None,
+            gitlab_collected_at=state.gitlab_collected_at if state else None,
+            tickets_count=(state.tickets_count if state else 0) or 0,
+            commits_count=(state.commits_count if state else 0) or 0,
+            has_cache=state is not None,
+        )
+    )
+
+
+@router.post("/workflow/run", response_class=HTMLResponse)
+async def workflow_run(date: str | None = Form(None), reuse: str = Form("false")) -> HTMLResponse:
+    selected = _coerce_date(date)
+    reuse_cached = reuse.lower() == "true"
     conn = _conn()
     in_flight = conn.execute(
         "SELECT 1 FROM runs WHERE run_date = ? AND status = 'in_progress' LIMIT 1",
         (selected,),
     ).fetchone()
     if in_flight is None:
-        _schedule_run(date_.fromisoformat(selected))
+        _schedule_run(date_.fromisoformat(selected), reuse_cached=reuse_cached)
     return _fragment(selected, just_triggered=True)
 
 
@@ -291,13 +326,32 @@ def _collect_window(selected: str) -> tuple[datetime, datetime]:
     return until - timedelta(days=1), until
 
 
-async def _collect_jira(selected: str) -> tuple[str | None, list[JiraTicket], str | None]:
-    """Pull the active sprint's tickets. Returns (sprint_id, tickets, error).
+class _JiraPull:
+    """Result of a one-shot Jira sprint pull (+ sprint progress for caching)."""
+
+    def __init__(
+        self,
+        sprint_id: str | None,
+        tickets: list[JiraTicket],
+        error: str | None,
+        sprint_day: int | None = None,
+        sprint_length: int | None = None,
+    ) -> None:
+        self.sprint_id = sprint_id
+        self.tickets = tickets
+        self.error = error
+        self.sprint_day = sprint_day
+        self.sprint_length = sprint_length
+
+
+async def _collect_jira(selected: str) -> _JiraPull:
+    """Pull the active sprint's tickets.
 
     Runs the same board resolution as the orchestrator pre-flight (config
     override → DB cache → live discovery) so this one-shot pull discovers a
     board instead of asking `list_sprint` to guess from an empty payload.
     """
+    from tl_agent.phases._sprint import sprint_progress
     from tl_agent.phases.sprint_select import resolve_board_id
     from tl_agent.storage import load_team
     from tl_agent.tools import ToolResult
@@ -311,24 +365,38 @@ async def _collect_jira(selected: str) -> tuple[str | None, list[JiraTicket], st
     finally:
         conn.close()
     if board_id is None:
-        return None, [], "could not resolve a Jira board — set board_id in config/team.md"
+        return _JiraPull(
+            None, [], "could not resolve a Jira board — set board_id in config/team.md"
+        )
 
     outcome = await ListSprintTool().invoke({"board_id": board_id}, run_date_iso=selected)
-    if isinstance(outcome, ToolResult):
-        return outcome.value.sprint_id, list(outcome.value.tickets), None
-    return None, [], outcome.message
+    if not isinstance(outcome, ToolResult):
+        return _JiraPull(None, [], outcome.message)
+    out = outcome.value
+    sprint_day, sprint_length = sprint_progress(
+        out.start_date, out.end_date, date_.fromisoformat(selected)
+    )
+    return _JiraPull(out.sprint_id, list(out.tickets), None, sprint_day, sprint_length)
 
 
 async def _collect_gitlab(
     selected: str, since: datetime, until: datetime
-) -> tuple[list[GitCommit], str | None]:
-    """Pull each team engineer's commits across every team project. Returns (commits, error)."""
+) -> tuple[list[GitCommit], Any, str | None]:
+    """Pull each team engineer's commits across every team project.
+
+    Returns (commits, manifest, error)."""
     from tl_agent.phases.phase1_collect import fetch_commits
     from tl_agent.storage import load_team
 
     notes: list[str] = []
-    commits, _manifest = await fetch_commits(load_team(), since, until, selected, notes)
-    return commits, "; ".join(notes) or None
+    conn = _conn()
+    try:
+        commits, manifest = await fetch_commits(
+            load_team(), since, until, selected, notes, conn=conn
+        )
+    finally:
+        conn.close()
+    return commits, manifest, "; ".join(notes) or None
 
 
 async def _collect_standup_segments(
@@ -395,49 +463,35 @@ def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
     return rows
 
 
-@router.post("/workflow/collect", response_class=HTMLResponse)
-async def workflow_collect(date: str | None = Form(None)) -> HTMLResponse:
-    from tl_agent.phases.phase1_collect import gitlab_commit_window
-    from tl_agent.storage import load_team
-
-    selected = _coerce_date(date)
-    commit_since, commit_until = gitlab_commit_window(date_.fromisoformat(selected), load_team())
-
-    sprint_id, tickets, jira_err = await _collect_jira(selected)
-    commits, gitlab_err = await _collect_gitlab(selected, commit_since, commit_until)
-
+def _render_jira_fragment(
+    selected: str,
+    tickets: list[JiraTicket],
+    sprint_id: str | None,
+    jira_err: str | None,
+    collected_at: str | None,
+) -> HTMLResponse:
     rows = _ticket_rows(tickets)
-    template = _env.get_template("_workflow_collect.html")
+    template = _env.get_template("_workflow_jira.html")
     return HTMLResponse(
         template.render(
             selected_date=selected,
-            since=commit_since.isoformat(),
-            until=commit_until.isoformat(),
             sprint_id=sprint_id,
             rows=rows,
             missing_count=sum(1 for r in rows if r["missing"]),
             unknown_count=sum(1 for r in rows if r["unknown"]),
-            commits=sorted(commits, key=lambda c: c.committed_at, reverse=True),
             jira_err=jira_err,
-            gitlab_err=gitlab_err,
+            collected_at=collected_at,
         )
     )
 
 
-@router.post("/workflow/collect_gitlab", response_class=HTMLResponse)
-async def workflow_collect_gitlab(date: str | None = Form(None)) -> HTMLResponse:
-    """One-shot pull of GitLab commits only — isolates the GitLab fetch from
-    the combined `/workflow/collect` (Jira + GitLab), for diagnosing GitLab-side
-    issues (project discovery, timeouts) without re-pulling Jira each time.
-    """
+def _render_gitlab_fragment(
+    selected: str, commits: list[GitCommit], gitlab_err: str | None
+) -> HTMLResponse:
     from tl_agent.phases.phase1_collect import gitlab_commit_window
     from tl_agent.storage import load_team
 
-    selected = _coerce_date(date)
     since, until = gitlab_commit_window(date_.fromisoformat(selected), load_team())
-
-    commits, gitlab_err = await _collect_gitlab(selected, since, until)
-
     template = _env.get_template("_workflow_gitlab.html")
     return HTMLResponse(
         template.render(
@@ -447,6 +501,103 @@ async def workflow_collect_gitlab(date: str | None = Form(None)) -> HTMLResponse
             gitlab_err=gitlab_err,
         )
     )
+
+
+@router.get("/workflow/jira_fragment", response_class=HTMLResponse)
+async def workflow_jira_fragment(date: str | None = None) -> HTMLResponse:
+    """Cached Jira tickets for the day — rendered on page load, no fetch."""
+    from tl_agent.storage.repos import collection_state
+    from tl_agent.storage.repos import snapshots as snapshots_repo
+
+    selected = _coerce_date(date)
+    run_date = date_.fromisoformat(selected)
+    conn = _conn()
+    try:
+        tickets = snapshots_repo.list_for_date(conn, run_date)
+        state = collection_state.get(conn, run_date)
+    finally:
+        conn.close()
+    return _render_jira_fragment(
+        selected,
+        tickets,
+        state.sprint_id if state else None,
+        None,
+        state.jira_collected_at if state else None,
+    )
+
+
+@router.post("/workflow/collect_jira", response_class=HTMLResponse)
+async def workflow_collect_jira(date: str | None = Form(None)) -> HTMLResponse:
+    """Refresh Jira sprint tickets from the service and persist them locally."""
+    from tl_agent.storage import transaction
+    from tl_agent.storage.repos import collection_state
+    from tl_agent.storage.repos import snapshots as snapshots_repo
+
+    selected = _coerce_date(date)
+    run_date = date_.fromisoformat(selected)
+    pull = await _collect_jira(selected)
+
+    if pull.error is None:
+        conn = _conn()
+        try:
+            with transaction(conn):
+                for ticket in pull.tickets:
+                    snapshots_repo.upsert(conn, run_date, ticket)
+                collection_state.set_jira(
+                    conn,
+                    run_date,
+                    sprint_id=pull.sprint_id,
+                    sprint_day=pull.sprint_day,
+                    sprint_length=pull.sprint_length,
+                    tickets_count=len(pull.tickets),
+                )
+        finally:
+            conn.close()
+
+    collected_at = datetime.now(UTC).isoformat() if pull.error is None else None
+    return _render_jira_fragment(selected, pull.tickets, pull.sprint_id, pull.error, collected_at)
+
+
+@router.get("/workflow/gitlab_fragment", response_class=HTMLResponse)
+async def workflow_gitlab_fragment(date: str | None = None) -> HTMLResponse:
+    """Cached GitLab commits for the day — rendered on page load, no fetch."""
+    from tl_agent.storage.repos import commits as commits_repo
+
+    selected = _coerce_date(date)
+    conn = _conn()
+    try:
+        commits = commits_repo.list_for_date(conn, date_.fromisoformat(selected))
+    finally:
+        conn.close()
+    return _render_gitlab_fragment(selected, commits, None)
+
+
+@router.post("/workflow/collect_gitlab", response_class=HTMLResponse)
+async def workflow_collect_gitlab(date: str | None = Form(None)) -> HTMLResponse:
+    """Refresh GitLab commits from the service and persist them locally."""
+    from tl_agent.phases.phase1_collect import gitlab_commit_window
+    from tl_agent.storage import load_team
+    from tl_agent.storage.repos import collection_state
+    from tl_agent.storage.repos import commits as commits_repo
+
+    selected = _coerce_date(date)
+    run_date = date_.fromisoformat(selected)
+    since, until = gitlab_commit_window(run_date, load_team())
+
+    commits, manifest, gitlab_err = await _collect_gitlab(selected, since, until)
+
+    if gitlab_err is None:
+        conn = _conn()
+        try:
+            commits_repo.replace_for_date(conn, run_date, commits)
+            collection_state.set_gitlab(
+                conn, run_date, manifest=manifest, commits_count=len(commits)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return _render_gitlab_fragment(selected, commits, gitlab_err)
 
 
 @router.post("/workflow/collect_standup", response_class=HTMLResponse)

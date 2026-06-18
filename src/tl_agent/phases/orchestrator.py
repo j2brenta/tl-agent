@@ -60,11 +60,20 @@ class RunResult:
     notes: list[str] = field(default_factory=list[str])
 
 
-async def run(run_date: date | None = None, sprint_id: str | None = None) -> RunResult:
+async def run(
+    run_date: date | None = None,
+    sprint_id: str | None = None,
+    *,
+    reuse_cached: bool = False,
+) -> RunResult:
     """Run the full P0 → P7 pipeline. Returns a RunResult.
 
     `sprint_id`, when given, is a human-resolved sprint from the Workflow tab:
     it skips discovery and operates over that sprint directly.
+
+    `reuse_cached` makes Phase 1 read locally-stored collection for `run_date`
+    instead of fetching from Jira/GitLab/chat (the Workflow "Reuse stored & run"
+    path). Defaults to False, so `tl-agent run` keeps collecting fresh.
     """
     init_tracing()
     _register_all_tools()
@@ -95,6 +104,7 @@ async def run(run_date: date | None = None, sprint_id: str | None = None) -> Run
         idempotency=idempotency,
         budget=budget,
         sprint_id=sprint_id,
+        reuse_cached=reuse_cached,
     )
 
     return await _run_pipeline(ctx)
