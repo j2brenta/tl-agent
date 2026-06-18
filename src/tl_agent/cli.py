@@ -229,17 +229,26 @@ def import_jira(
     from datetime import date as _date
 
     from tl_agent.settings import get_settings
-    from tl_agent.storage import connect, transaction
+    from tl_agent.storage import connect, load_team, transaction
     from tl_agent.storage.repos import snapshots as snapshots_repo
     from tl_agent.tools.jira import ListSprintIn, ListSprintTool
 
     target = _date.fromisoformat(run_date) if run_date else _date.today()
 
+    board_id = load_team().board_id
+    if not board_id:
+        raise typer.BadParameter(
+            "no board configured — add `- **board_id:** <id>` under Sprint scope "
+            "in team.md (config/ default, or your local override dir). The active "
+            "sprint on that board is what gets imported."
+        )
+
     async def _run() -> int:
         tool = ListSprintTool()
         from tl_agent.tools.base import ToolError
 
-        outcome = await tool.invoke(ListSprintIn().model_dump(), run_date_iso=target.isoformat())
+        args = ListSprintIn(board_id=board_id).model_dump()
+        outcome = await tool.invoke(args, run_date_iso=target.isoformat())
         if isinstance(outcome, ToolError):
             raise RuntimeError(outcome.message)
         result = outcome.value
@@ -251,6 +260,50 @@ def import_jira(
 
     n = asyncio.run(_run())
     console.print(f"[green]imported {n} tickets for {target.isoformat()}[/green]")
+
+
+# Instance-specific config: per-deployment, must survive a `git pull`. The
+# contract files (router*.yaml, prompts.yaml, escalation.md) are intentionally
+# excluded — those should keep tracking the committed version.
+_LOCAL_CONFIG_FILES = (
+    "team.md",
+    "ownership.md",
+    "tl_preferences.md",
+    "gitlab_projects.yaml",
+    "chat_channels.yaml",
+)
+
+
+@app.command(name="init-local-config")
+def init_local_config(
+    force: Annotated[
+        bool,
+        _opt("--force", help="overwrite files that already exist in the local dir"),
+    ] = False,
+) -> None:
+    """Seed the local override dir with copies of the committed instance config.
+
+    Files placed in `local_config_dir` shadow the committed defaults, so you can
+    edit your roster / allowlists there and `git pull` won't clobber them. Run
+    once per machine, then edit the copies. Override the location with
+    `TLA_LOCAL_CONFIG_DIR` (defaults to `$XDG_CONFIG_HOME/tl-agent`).
+    """
+    import shutil
+
+    from tl_agent.settings import get_settings
+
+    settings = get_settings()
+    dest_dir = settings.local_config_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    console.print(f"local config dir: [cyan]{dest_dir}[/cyan]")
+    for name in _LOCAL_CONFIG_FILES:
+        src = settings.config_dir / name
+        dest = dest_dir / name
+        if dest.exists() and not force:
+            console.print(f"  [yellow]skip[/yellow] {name} (exists — use --force)")
+            continue
+        shutil.copyfile(src, dest)
+        console.print(f"  [green]copied[/green] {name}")
 
 
 @app.command()

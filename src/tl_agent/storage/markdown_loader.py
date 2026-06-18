@@ -18,6 +18,16 @@ import yaml
 from tl_agent.models import Engineer, Role
 from tl_agent.settings import get_settings
 
+
+def _resolve(name: str, config_dir: Path | None) -> Path:
+    """Locate a config file. An explicit `config_dir` (tests) wins verbatim;
+    otherwise go through the settings overlay so local copies shadow defaults.
+    """
+    if config_dir is not None:
+        return config_dir / name
+    return get_settings().resolve_config(name)
+
+
 # A `## H2` introduces one engineer; bullet lines of the form `- **key:** value`
 # below it become the per-engineer attributes.
 _ENGINEER_HEADER = re.compile(r"^##\s+(?P<name>.+?)\s*$", re.MULTILINE)
@@ -99,8 +109,7 @@ def _parse_engineer_block(name: str, block: str) -> Engineer:
 
 def load_team(config_dir: Path | None = None) -> TeamConfig:
     """Parse `config/team.md` into a `TeamConfig`."""
-    root = config_dir or get_settings().config_dir
-    path = root / "team.md"
+    path = _resolve("team.md", config_dir)
     text = path.read_text(encoding="utf-8")
 
     headers = list(_ENGINEER_HEADER.finditer(text))
@@ -152,8 +161,7 @@ def load_markdown(name: str, config_dir: Path | None = None) -> str:
     we hand the whole file to the LLM as context. The LLM is good at reading
     markdown; we don't need to re-parse it.
     """
-    root = config_dir or get_settings().config_dir
-    return (root / name).read_text(encoding="utf-8")
+    return _resolve(name, config_dir).read_text(encoding="utf-8")
 
 
 # -------------------- allowlists (chat channels, gitlab projects) --------------------
@@ -173,13 +181,11 @@ def _load_allowlist(path: Path, key: str) -> frozenset[str]:
 
 
 def load_allowed_chat_channels(config_dir: Path | None = None) -> frozenset[str]:
-    root = config_dir or get_settings().config_dir
-    return _load_allowlist(root / "chat_channels.yaml", "allowed_channels")
+    return _load_allowlist(_resolve("chat_channels.yaml", config_dir), "allowed_channels")
 
 
 def load_allowed_gitlab_projects(config_dir: Path | None = None) -> frozenset[str]:
-    root = config_dir or get_settings().config_dir
-    return _load_allowlist(root / "gitlab_projects.yaml", "allowed_projects")
+    return _load_allowlist(_resolve("gitlab_projects.yaml", config_dir), "allowed_projects")
 
 
 def clear_allowlist_cache() -> None:
