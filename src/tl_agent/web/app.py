@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse
 
 from tl_agent.obs.tracing import init_tracing
 from tl_agent.web.routes import decisions as decisions_route
+from tl_agent.web.routes import discovery as discovery_route
 from tl_agent.web.routes import review as review_route
 from tl_agent.web.routes import runs as runs_route
 from tl_agent.web.routes import sprint as sprint_route
@@ -88,6 +89,7 @@ app.include_router(sprint_route.router)
 app.include_router(runs_route.router)
 app.include_router(team_route.router)
 app.include_router(workflow_route.router)
+app.include_router(discovery_route.router)
 
 
 @app.post("/jira/import", response_class=HTMLResponse)

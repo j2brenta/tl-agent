@@ -1,0 +1,115 @@
+{% extends "_base.html" %}
+{% block title %}Discovery{% endblock %}
+{% block nav_discovery %}active{% endblock %}
+
+{% block page_data %}
+<script>
+  window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
+  window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+</script>
+{% endblock %}
+
+{% block body %}
+<div class="page-header">
+  <h1>Discovery <span class="sprint-name">GitLab coverage · {{ selected_date }}</span></h1>
+</div>
+
+<div class="banner banner-warn">
+  <span>⚠</span>
+  <span>
+    Commits are collected per project, then attributed by author. An author
+    that doesn't resolve to anyone in <code>config/team.md</code> shows up under
+    <strong>Unconfigured contributors</strong> — someone from another team
+    pushed to a team repo, or a roster member is missing their GitLab
+    <code>email</code>/<code>username</code>.
+  </span>
+</div>
+
+{% if error %}
+<div class="banner banner-warn"><span>⚠</span><span>GitLab fetch issues: {{ error }}</span></div>
+{% endif %}
+
+<div class="card">
+  <div class="section-label">
+    Discovered
+    <span style="color:var(--text-faint);font-weight:400;font-size:11px">
+      (<time datetime="{{ since }}">{{ since[:16].replace('T',' ') }}</time> →
+       <time datetime="{{ until }}">{{ until[:16].replace('T',' ') }}</time> UTC)
+    </span>
+  </div>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px">
+    <div>
+      <div style="color:var(--text-faint);font-size:11px">GitLab group(s)</div>
+      {% if manifest.gitlab_groups %}
+        {% for g in manifest.gitlab_groups %}<code>{{ g }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+      {% else %}
+        <span style="color:var(--text-faint)">none configured</span>
+      {% endif %}
+      {% if manifest.used_fallback %}<span class="badge badge-amber" title="Discovery fell back to config/gitlab_projects.yaml">⚠ fallback list</span>{% endif %}
+    </div>
+    <div>
+      <div style="color:var(--text-faint);font-size:11px">Projects</div>
+      <strong>{{ manifest.projects | length }}</strong>
+    </div>
+    <div>
+      <div style="color:var(--text-faint);font-size:11px">Team commits</div>
+      <strong>{{ team_commit_count }}</strong>
+    </div>
+    <div>
+      <div style="color:var(--text-faint);font-size:11px">Unconfigured contributors</div>
+      <strong{% if manifest.unconfigured_authors %} style="color:var(--red)"{% endif %}>{{ manifest.unconfigured_authors | length }}</strong>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-label">Project coverage</div>
+  {% if not manifest.projects %}
+  <div style="font-size:13px;color:var(--text-muted)">No projects discovered.</div>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Project</th><th>Searched</th><th>Commits</th><th>Note</th></tr>
+    </thead>
+    <tbody>
+      {% for p in manifest.projects %}
+      <tr>
+        <td><code>{{ p.project }}</code></td>
+        <td>
+          {% if p.searched %}<span style="color:var(--green)">✓ searched</span>
+          {% else %}<span class="badge badge-amber">⚠ failed</span>{% endif %}
+        </td>
+        <td>{{ p.commit_count }}</td>
+        <td style="color:var(--text-muted)">{{ p.error or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="section-label">Unconfigured contributors</div>
+  {% if not manifest.unconfigured_authors %}
+  <div style="font-size:13px;color:var(--text-muted)">
+    Every commit author in this window resolves to someone on the roster.
+  </div>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Author</th><th>Project</th><th>Commits</th><th>Sample commit</th></tr>
+    </thead>
+    <tbody>
+      {% for a in manifest.unconfigured_authors %}
+      <tr>
+        <td><span class="badge badge-amber">⚠ {{ a.author }}</span></td>
+        <td><code>{{ a.project }}</code></td>
+        <td>{{ a.commit_count }}</td>
+        <td style="font-family:var(--mono);color:var(--text-faint)">{{ a.sample_sha[:8] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

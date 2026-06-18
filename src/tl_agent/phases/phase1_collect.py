@@ -17,11 +17,14 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 
 from tl_agent.models import (
+    CollectionManifest,
     DailySignals,
     Engineer,
     GitCommit,
     JiraTicket,
+    ProjectCoverage,
     StandupMessage,
+    UnconfiguredAuthor,
 )
 from tl_agent.obs.spans import phase_span
 from tl_agent.phases._context import RunContext
@@ -72,9 +75,10 @@ async def run(ctx: RunContext) -> DailySignals:
     standups_today_task = fetch_standups(ctx, since=since, until=until)
     standups_yesterday_task = fetch_standups(ctx, since=since - timedelta(days=1), until=since)
 
-    sprint, commits, st_today, st_yesterday = await asyncio.gather(
+    sprint, commit_result, st_today, st_yesterday = await asyncio.gather(
         sprint_task, commits_task, standups_today_task, standups_yesterday_task
     )
+    commits, manifest = commit_result
 
     # Segment + classify today's standups (update vs off-topic/mood). Cached
     # by (chat_message_id, engineer_id, segment_index) — messages already
@@ -104,7 +108,9 @@ async def run(ctx: RunContext) -> DailySignals:
             "standups_yesterday": len(st_yesterday),
             "standup_segments": len(segments),
             "gitlab_groups": list(ctx.team.gitlab_groups),
-            "gitlab_projects": sorted({c.project for c in commits}),
+            "gitlab_projects": [p.project for p in manifest.projects],
+            "gitlab_used_fallback": manifest.used_fallback,
+            "gitlab_unconfigured_authors": len(manifest.unconfigured_authors),
             "standup_channel_id": ctx.standup_channel_id,
             "notes": list(ctx.notes),
         },
@@ -119,6 +125,7 @@ async def run(ctx: RunContext) -> DailySignals:
         commits=commits,
         sprint_day=sprint_day,
         sprint_length_days=sprint_length,
+        collection_manifest=manifest,
     )
 
 
@@ -170,11 +177,15 @@ def _resolve_people(ticket: JiraTicket, ctx: RunContext) -> JiraTicket:
     return ticket.model_copy(update={"assignee": assignee, "reporter": reporter})
 
 
-async def _discover_projects(team: TeamConfig, run_date_iso: str, notes: list[str]) -> list[str]:
+async def _discover_projects(
+    team: TeamConfig, run_date_iso: str, notes: list[str]
+) -> tuple[list[str], bool]:
     """Resolve the team's GitLab projects: every project under each configured group.
 
-    Falls back to `config/gitlab_projects.yaml` when `team.gitlab_groups` is
-    empty, or when a group's discovery call fails.
+    Returns `(projects, used_fallback)` — `used_fallback` is True when the list
+    came from `config/gitlab_projects.yaml` instead of live group discovery
+    (because `team.gitlab_groups` is empty, or every discovery call came back
+    empty).
     """
     if not team.gitlab_groups:
         fallback = sorted(load_allowed_gitlab_projects())
@@ -182,7 +193,7 @@ async def _discover_projects(team: TeamConfig, run_date_iso: str, notes: list[st
             "phase1.gitlab_discovery_skipped",
             extra={"reason": "no gitlab_groups configured", "fallback_projects": fallback},
         )
-        return fallback
+        return fallback, True
 
     tool = ListGroupProjectsTool()
 
@@ -214,15 +225,17 @@ async def _discover_projects(team: TeamConfig, run_date_iso: str, notes: list[st
             "phase1.gitlab_discovery_fallback",
             extra={"gitlab_groups": list(team.gitlab_groups), "fallback_projects": fallback},
         )
-        return fallback
+        return fallback, True
     logger.debug(
         "phase1.gitlab_discovery_resolved",
         extra={"gitlab_groups": list(team.gitlab_groups), "projects": projects},
     )
-    return projects
+    return projects, False
 
 
-async def _fetch_commits(ctx: RunContext, since: datetime, until: datetime) -> list[GitCommit]:
+async def _fetch_commits(
+    ctx: RunContext, since: datetime, until: datetime
+) -> tuple[list[GitCommit], CollectionManifest]:
     return await fetch_commits(ctx.team, since, until, ctx.run_date_iso, ctx.notes)
 
 
@@ -232,74 +245,99 @@ async def fetch_commits(
     until: datetime,
     run_date_iso: str,
     notes: list[str],
-) -> list[GitCommit]:
-    """Pull each engineer's commits across every GitLab project the team owns.
+) -> tuple[list[GitCommit], CollectionManifest]:
+    """Pull every commit in each team GitLab project, then attribute by author.
 
-    Queried by engineer (`author=gitlab_username`) rather than by a single
-    configured project, so commits land regardless of which of the team's
-    repos they were pushed to. Projects come from `list_group_projects` for
-    each group in `team.gitlab_groups` (config/team.md → Repo scope);
+    One **unfiltered** `list_commits` per project (not per engineer), then each
+    commit is bucketed with `team.resolve(author)`:
+
+    - resolves to an *engineer* → kept in the returned `commits` (the
+      "team commits" set Phase 2/3 reason over — unchanged semantics).
+    - resolves to a non-engineer (TL/PM) → counted in coverage but neither
+      triaged nor flagged.
+    - resolves to nobody → recorded as an `UnconfiguredAuthor` (someone outside
+      the configured team pushed to a team repo, or a roster member is missing
+      their `email`/`gitlab_username` in config/team.md).
+
+    Projects come from `list_group_projects` for each group in
+    `team.gitlab_groups` (config/team.md → Repo scope);
     `config/gitlab_projects.yaml` is the fallback when no group is configured.
     """
-    projects = await _discover_projects(team, run_date_iso, notes)
-    engineers = [e for e in team.engineers if e.gitlab_username]
+    projects, used_fallback = await _discover_projects(team, run_date_iso, notes)
+    engineer_ids = {e.id for e in team.engineers}
     tool = ListCommitsTool()
 
-    async def _one(project: str, engineer: Engineer) -> list[GitCommit]:
+    async def _one(project: str) -> tuple[str, list[GitCommit] | None, str | None]:
         result = await tool.invoke(
-            {
-                "project": project,
-                "since": since.isoformat(),
-                "until": until.isoformat(),
-                "author": engineer.gitlab_username,
-            },
+            {"project": project, "since": since.isoformat(), "until": until.isoformat()},
             run_date_iso=run_date_iso,
         )
         if not isinstance(result, ToolResult):
-            notes.append(
-                f"phase1: gitlab commits fetch failed for {project}/{engineer.id} "
-                f"({result.kind.value}): {result.message}"
-            )
+            detail = f"{result.kind.value}: {result.message}"
+            notes.append(f"phase1: gitlab commits fetch failed for {project} ({detail})")
             logger.debug(
                 "phase1.gitlab_commits_failed",
                 extra={
                     "project": project,
-                    "engineer": engineer.id,
                     "kind": result.kind.value,
                     "error_detail": result.message,
                 },
             )
-            return []
+            return project, None, detail
         commits = list(result.value.commits)
         logger.debug(
             "phase1.gitlab_commits_ok",
             extra={
                 "project": project,
-                "engineer": engineer.id,
                 "commits": len(commits),
                 "latency_ms": round(result.latency_ms, 1),
             },
         )
-        return commits
+        return project, commits, None
 
-    # Logged because every (project, engineer) pair fires as a concurrent
-    # `list_commits` call against the same GitLab instance — under the
-    # Rosetta-emulated GitLab CE image (see infra/docker-compose.yml), a fan-out
-    # this wide can queue behind Puma's worker count and trip the 10s httpx
-    # timeout even though each request is individually fast.
+    # One concurrent `list_commits` per project against the same GitLab
+    # instance. Fewer calls than the old per-(project, engineer) fan-out, which
+    # matters under the Rosetta-emulated GitLab CE image (see
+    # infra/docker-compose.yml): a wide fan-out queues behind Puma's worker
+    # count and can trip the 10s httpx timeout even when each request is fast.
     logger.info(
         "phase1.gitlab_commits_fanout",
-        extra={
-            "projects": projects,
-            "engineers": [e.id for e in engineers],
-            "concurrent_requests": len(projects) * len(engineers),
-        },
+        extra={"projects": projects, "concurrent_requests": len(projects)},
     )
-    results = await asyncio.gather(*(_one(p, e) for p in projects for e in engineers))
+    results = await asyncio.gather(*(_one(p) for p in projects))
+
     commits: list[GitCommit] = []
-    for r in results:
-        commits.extend(r)
-    return commits
+    coverage: list[ProjectCoverage] = []
+    # Aggregate unconfigured commits by (author, project) so the manifest shows
+    # one row per off-roster contributor per repo, with a count + sample sha.
+    unconfigured: dict[tuple[str, str], list[GitCommit]] = {}
+    for project, project_commits, error in results:
+        if project_commits is None:
+            coverage.append(ProjectCoverage(project=project, searched=False, error=error))
+            continue
+        coverage.append(
+            ProjectCoverage(project=project, searched=True, commit_count=len(project_commits))
+        )
+        for c in project_commits:
+            resolved = team.resolve(c.author)
+            if resolved in engineer_ids:
+                commits.append(c)
+            elif resolved is None:
+                unconfigured.setdefault((c.author, project), []).append(c)
+
+    unconfigured_authors = [
+        UnconfiguredAuthor(
+            author=author, project=project, commit_count=len(cs), sample_sha=cs[0].sha
+        )
+        for (author, project), cs in sorted(unconfigured.items())
+    ]
+    manifest = CollectionManifest(
+        gitlab_groups=tuple(team.gitlab_groups),
+        used_fallback=used_fallback,
+        projects=sorted(coverage, key=lambda p: p.project),
+        unconfigured_authors=unconfigured_authors,
+    )
+    return commits, manifest
 
 
 async def fetch_standups(

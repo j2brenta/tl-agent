@@ -327,7 +327,7 @@ async def _collect_gitlab(
     from tl_agent.storage import load_team
 
     notes: list[str] = []
-    commits = await fetch_commits(load_team(), since, until, selected, notes)
+    commits, _manifest = await fetch_commits(load_team(), since, until, selected, notes)
     return commits, "; ".join(notes) or None
 
 

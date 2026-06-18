@@ -18,6 +18,7 @@ from tl_agent.models.flag import Flag, FlagType
 from tl_agent.models.hotspot import Hotspot
 from tl_agent.models.prediction import Prediction, PredictionOutcome
 from tl_agent.models.signals import (
+    CollectionManifest,
     DailySignals,
     GitCommit,
     JiraEstimateChange,
@@ -26,9 +27,11 @@ from tl_agent.models.signals import (
     JiraStatus,
     JiraStatusChange,
     JiraTicket,
+    ProjectCoverage,
     StandupMessage,
     StandupSegment,
     StandupSegmentKind,
+    UnconfiguredAuthor,
 )
 from tl_agent.models.triage import (
     EngineerTriage,
@@ -44,6 +47,7 @@ __all__ = [
     "ChatChannel",
     "ChatMessage",
     "ChatUser",
+    "CollectionManifest",
     "DailySignals",
     "Decision",
     "Engineer",
@@ -63,6 +67,7 @@ __all__ = [
     "PostResult",
     "Prediction",
     "PredictionOutcome",
+    "ProjectCoverage",
     "ResponseDraft",
     "ResponseMode",
     "Role",
@@ -71,4 +76,5 @@ __all__ = [
     "StandupSegment",
     "StandupSegmentKind",
     "TriageStatus",
+    "UnconfiguredAuthor",
 ]

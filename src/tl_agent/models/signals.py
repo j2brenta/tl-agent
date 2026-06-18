@@ -158,6 +158,51 @@ class StandupSegment(BaseModel):
     kind: StandupSegmentKind
 
 
+# -------------------- GitLab collection manifest --------------------
+
+
+class ProjectCoverage(BaseModel):
+    """One discovered GitLab project and whether its commits were searched."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    project: str
+    searched: bool  # the unfiltered list_commits call succeeded
+    commit_count: int = Field(default=0, ge=0)
+    error: str | None = None
+
+
+class UnconfiguredAuthor(BaseModel):
+    """A commit author that does not resolve to anyone on the team roster.
+
+    Surfaced as a GitLab identity-mapping gap: someone outside the configured
+    team pushed to a team repo (or a roster member's `email`/`gitlab_username`
+    is missing from `config/team.md`).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    author: str  # raw email/name exactly as GitLab reports it
+    project: str
+    commit_count: int = Field(ge=1)
+    sample_sha: str
+
+
+class CollectionManifest(BaseModel):
+    """What Phase 1 discovered and searched on the GitLab side.
+
+    Answers "which repos did we look at, and who pushed that we don't know
+    about?" — populated by `phases.phase1_collect.fetch_commits`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gitlab_groups: tuple[str, ...] = ()
+    used_fallback: bool = False  # fell back to config/gitlab_projects.yaml
+    projects: list[ProjectCoverage] = Field(default_factory=list[ProjectCoverage])
+    unconfigured_authors: list[UnconfiguredAuthor] = Field(default_factory=list[UnconfiguredAuthor])
+
+
 # -------------------- aggregate --------------------
 
 
@@ -181,3 +226,4 @@ class DailySignals(BaseModel):
     sprint_length_days: int = Field(ge=1)
     planned_points: float = 0.0
     completed_points: float = 0.0
+    collection_manifest: CollectionManifest | None = None

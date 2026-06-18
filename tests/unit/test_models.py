@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from tl_agent.models import (
     ApprovalAction,
+    CollectionManifest,
     DailySignals,
     Decision,
     Engineer,
@@ -28,6 +29,7 @@ from tl_agent.models import (
     JiraTicket,
     Prediction,
     PredictionOutcome,
+    ProjectCoverage,
     ResponseDraft,
     ResponseMode,
     Role,
@@ -35,6 +37,7 @@ from tl_agent.models import (
     StandupSegment,
     StandupSegmentKind,
     TriageStatus,
+    UnconfiguredAuthor,
 )
 
 
@@ -224,4 +227,46 @@ def test_standup_segment_rejects_unknown_field() -> None:
                 "kind": "update",
                 "mood_score": 5,
             }
+        )
+
+
+def test_collection_manifest_round_trips() -> None:
+    manifest = CollectionManifest(
+        gitlab_groups=("tl-agent",),
+        used_fallback=False,
+        projects=[
+            ProjectCoverage(project="tl-agent/demo", searched=True, commit_count=3),
+            ProjectCoverage(project="tl-agent/api", searched=False, error="timeout"),
+        ],
+        unconfigured_authors=[
+            UnconfiguredAuthor(
+                author="outsider@other.local",
+                project="tl-agent/demo",
+                commit_count=2,
+                sample_sha="0ut51d3",
+            )
+        ],
+    )
+    assert manifest.projects[1].commit_count == 0  # default
+    assert manifest.unconfigured_authors[0].author == "outsider@other.local"
+
+    sig = DailySignals(
+        run_date="2026-05-22",
+        sprint_day=1,
+        sprint_length_days=10,
+        collection_manifest=manifest,
+    )
+    assert sig.collection_manifest is not None
+    assert sig.collection_manifest.gitlab_groups == ("tl-agent",)
+    # Optional by default — existing serialized signals stay valid.
+    assert (
+        DailySignals(run_date="2026-05-22", sprint_day=1, sprint_length_days=10).collection_manifest
+        is None
+    )
+
+
+def test_unconfigured_author_requires_at_least_one_commit() -> None:
+    with pytest.raises(ValidationError):
+        UnconfiguredAuthor(
+            author="x@y.local", project="tl-agent/demo", commit_count=0, sample_sha="abc"
         )
