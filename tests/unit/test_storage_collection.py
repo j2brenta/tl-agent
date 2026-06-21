@@ -40,9 +40,9 @@ def _commit(sha: str, project: str, author: str = "john") -> GitCommit:
     )
 
 
-def test_schema_version_is_2(conn) -> None:  # type: ignore[no-untyped-def]
+def test_schema_version_is_3(conn) -> None:  # type: ignore[no-untyped-def]
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
-    assert row["value"] == "2"
+    assert row["value"] == "3"
 
 
 def test_gitlab_projects_upsert_and_removed(conn) -> None:  # type: ignore[no-untyped-def]
@@ -87,15 +87,18 @@ def test_collection_state_jira_and_gitlab_dont_clobber(conn) -> None:  # type: i
         conn, d, sprint_id="S1", sprint_day=3, sprint_length=10, tickets_count=42
     )
     collection_state.set_gitlab(conn, d, manifest=manifest, commits_count=7)
+    collection_state.set_standup(conn, d, standups_count=4)
 
     st = collection_state.get(conn, d)
     assert st is not None
-    # Both writes survive each other.
+    # All three writes survive each other.
     assert st.sprint_id == "S1" and st.tickets_count == 42 and st.sprint_day == 3
     assert st.commits_count == 7
+    assert st.standups_count == 4
     assert st.manifest is not None
     assert st.manifest.projects[0].project == "grp/a"
     assert st.jira_collected_at is not None and st.gitlab_collected_at is not None
+    assert st.standup_collected_at is not None
 
 
 def test_collection_state_missing_is_none(conn) -> None:  # type: ignore[no-untyped-def]

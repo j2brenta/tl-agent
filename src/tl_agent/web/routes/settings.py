@@ -55,17 +55,44 @@ async def _probe(url: str, *, headers: dict[str, str] | None = None) -> dict[str
     return {"ok": resp.status_code < 500, "detail": f"HTTP {resp.status_code}", "url": url}
 
 
+def _resolve_router_config_path() -> Path:
+    """The router config path settings *would* use, even if it fails to load."""
+    s = get_settings()
+    if s.router_config:
+        override = Path(s.router_config)
+        return override if override.is_absolute() else s.repo_root / override
+    return s.resolve_config("router.yaml")
+
+
 def _router_view() -> dict[str, Any]:
-    """Active router config path + per-phase (provider, model) map."""
+    """Active router config path + per-phase (provider, model) map.
+
+    Never raises: a missing or malformed router config is reported via an
+    `error` key so the diagnostics page can surface it instead of 500-ing —
+    answering "why did X fail?" is this page's entire job.
+    """
     from tl_agent.llm.router import build_default
 
-    r = build_default()
+    try:
+        r = build_default()
+    except Exception as exc:
+        return {
+            "config_path": str(_resolve_router_config_path()),
+            "routes": [],
+            "used_providers": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     routes = [
         {"phase": name, "provider": rt.provider, "model": rt.model}
         for name, rt in sorted(r.routes.items())
     ]
     used = sorted({rt.provider for rt in r.routes.values()})
-    return {"config_path": str(r.config_path), "routes": routes, "used_providers": used}
+    return {
+        "config_path": str(r.config_path),
+        "routes": routes,
+        "used_providers": used,
+        "error": None,
+    }
 
 
 def _storage_rows(s: Settings) -> list[dict[str, Any]]:
@@ -162,6 +189,13 @@ async def settings_page() -> HTMLResponse:
 
     # --- top-of-page warnings: backends the router actually relies on --------
     warnings: list[str] = []
+    if rv["error"]:
+        warnings.append(
+            f"The router config could not be loaded from {rv['config_path']} "
+            f"({rv['error']}). Set TLA_ROUTER_CONFIG to an existing file — available "
+            "configs: router.yaml, router.ollama.yaml, router.light.anthropic.yaml. "
+            "Every pipeline phase depends on this, not just Settings."
+        )
     if "ollama" in rv["used_providers"] and not results["ollama"]["ok"]:
         warnings.append(
             f"The active router ({rv['config_path']}) routes phases to Ollama, but "

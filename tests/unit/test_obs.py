@@ -14,6 +14,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
 from tl_agent.obs import RunMetrics, llm_span, phase_span, set_llm_attrs, tool_span
 from tl_agent.obs.jsonl_sink import JsonlSpanExporter
+from tl_agent.obs.spans import set_llm_outcome
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +79,47 @@ def test_tool_and_llm_spans_emit_attributes(_tracer_provider: Path) -> None:
     assert llm["attributes"]["tl_agent.tokens.output"] == 40
     assert llm["attributes"]["tl_agent.cost_usd"] == pytest.approx(0.003)
     assert llm["attributes"]["tl_agent.phase"] == "phase3"
+
+
+def test_llm_outcome_failure_marks_span_error_with_event(_tracer_provider: Path) -> None:
+    with llm_span("qwen3:8b", phase="standup_segments"):
+        set_llm_outcome(
+            "empty",
+            attempt=2,
+            detail="no content after stripping <think> blocks",
+            preview="<think>reasoning that never ended",
+        )
+
+    today_dirs = list(_tracer_provider.iterdir())
+    spans = [
+        json.loads(line)
+        for line in (today_dirs[0] / "spans.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    llm = next(s for s in spans if s["name"] == "tl_agent.llm.qwen3:8b")
+
+    assert llm["status"] == "ERROR"
+    assert llm["attributes"]["tl_agent.llm.outcome"] == "empty"
+    assert llm["attributes"]["tl_agent.llm.attempt"] == 2
+    assert "<think>" in llm["attributes"]["tl_agent.llm.content_preview"]
+
+    event = next(ev for ev in llm["events"] if ev["name"] == "llm.parse_failed")
+    assert event["attributes"]["outcome"] == "empty"
+
+
+def test_llm_outcome_ok_leaves_span_unset(_tracer_provider: Path) -> None:
+    with llm_span("qwen3:8b", phase="standup_segments"):
+        set_llm_outcome("ok", attempt=1)
+
+    today_dirs = list(_tracer_provider.iterdir())
+    spans = [
+        json.loads(line)
+        for line in (today_dirs[0] / "spans.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    llm = next(s for s in spans if s["name"] == "tl_agent.llm.qwen3:8b")
+
+    assert llm["status"] != "ERROR"
+    assert llm["attributes"]["tl_agent.llm.outcome"] == "ok"
+    assert not [ev for ev in llm["events"] if ev["name"] == "llm.parse_failed"]
 
 
 def test_run_metrics_aggregates_from_jsonl(_tracer_provider: Path) -> None:

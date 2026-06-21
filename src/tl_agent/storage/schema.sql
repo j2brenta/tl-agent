@@ -246,13 +246,15 @@ CREATE TABLE IF NOT EXISTS collection_state (
     run_date           TEXT PRIMARY KEY,   -- YYYY-MM-DD
     jira_collected_at  TEXT,               -- RFC3339, NULL until Jira collected
     gitlab_collected_at TEXT,              -- RFC3339, NULL until GitLab collected
+    standup_collected_at TEXT,             -- RFC3339, NULL until standup collected
     sprint_id          TEXT,
     sprint_day         INTEGER,
     sprint_length      INTEGER,
     tickets_count      INTEGER,
     commits_count      INTEGER,
+    standups_count     INTEGER,
     manifest_json      TEXT                -- JSON: CollectionManifest
 );
 
 -- ---------- schema_meta seed ----------
-INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '2');
+INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '3');

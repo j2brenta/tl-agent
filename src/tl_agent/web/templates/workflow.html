@@ -86,7 +86,9 @@
 <div id="standup-spin" style="font-size:12px;color:var(--text-faint);margin-bottom:8px">
   Fetching + parsing standup…
 </div>
-<div id="workflow-standup" style="margin-bottom:16px"></div>
+<div id="workflow-standup" style="margin-bottom:16px"
+     hx-get="/workflow/standup_fragment?date={{ selected_date }}"
+     hx-trigger="load" hx-swap="innerHTML"></div>
 
 <dialog id="standup-modal"><div id="standup-modal-body"></div></dialog>
 

@@ -48,6 +48,36 @@ def db() -> sqlite3.Connection:
     return conn
 
 
+def test_connect_tolerates_locked_db_during_journal_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """connect() doesn't 500 when another connection is mid-write.
+
+    Regression for "database is locked": in the container's rollback-journal
+    (TRUNCATE) mode, connect()'s `PRAGMA journal_mode` takes an EXCLUSIVE lock
+    that SQLite refuses *immediately* (no busy-wait) when a writer — e.g. a
+    background run's per-phase checkpoints — holds the DB. The mode is an
+    optimization, so connect() falls back to the default journal instead of
+    raising. We hold a write lock and assert connect() still works.
+    """
+    monkeypatch.setenv("TLA_SQLITE_JOURNAL_MODE", "TRUNCATE")
+    db_path = tmp_path / "lock.db"
+    initialize(connect(db_path))  # create the file + schema
+
+    holder = connect(db_path)
+    holder.execute("BEGIN IMMEDIATE")  # hold a RESERVED write lock for the test
+
+    # Before the fix the journal_mode PRAGMA raised sqlite3.OperationalError here.
+    conn = connect(db_path)
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    # The connection is usable for reads even while the writer holds the lock.
+    assert conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+
+    conn.close()
+    holder.execute("COMMIT")
+    holder.close()
+
+
 def _today() -> date:
     return date(2026, 5, 22)
 

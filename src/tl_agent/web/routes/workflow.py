@@ -259,8 +259,10 @@ async def workflow_run_prompt(date: str | None = None) -> HTMLResponse:
             selected_date=selected,
             jira_collected_at=state.jira_collected_at if state else None,
             gitlab_collected_at=state.gitlab_collected_at if state else None,
+            standup_collected_at=state.standup_collected_at if state else None,
             tickets_count=(state.tickets_count if state else 0) or 0,
             commits_count=(state.commits_count if state else 0) or 0,
+            standups_count=(state.standups_count if state else 0) or 0,
             has_cache=state is not None,
         )
     )
@@ -402,6 +404,42 @@ async def _collect_gitlab(
     return commits, manifest, "; ".join(notes) or None
 
 
+def _persist_standup_collection(
+    conn: sqlite3.Connection, run_date: date_, messages: list[Any]
+) -> None:
+    """Persist raw standup observations + record the collection in
+    `collection_state`, so a later "Run now → reuse" reads these standups back
+    (like Jira/GitLab) and the Run-now panel shows standup as collected.
+
+    Mirrors phase1's `_persist_collection`: each message upserts an observation
+    keyed `(run_date, engineer_id)`. The count is distinct engineers, matching
+    how the panel counts "people". Best-effort — never aborts collection.
+    """
+    from tl_agent.storage import transaction
+    from tl_agent.storage.repos import collection_state
+    from tl_agent.storage.repos import observations as observations_repo
+
+    if not messages:
+        return
+    try:
+        with transaction(conn):
+            for msg in messages:
+                observations_repo.upsert(
+                    conn,
+                    obs_id=f"{msg.date_iso}:{msg.engineer_id}",
+                    run_date=date_.fromisoformat(msg.date_iso),
+                    engineer_id=msg.engineer_id,
+                    raw=msg.raw,
+                    summary=None,
+                    chat_message_id=msg.chat_message_id,
+                )
+            collection_state.set_standup(
+                conn, run_date, standups_count=len({m.engineer_id for m in messages})
+            )
+    except Exception:
+        logger.warning("workflow.standup_persist_failed", extra={"run_date": run_date.isoformat()})
+
+
 async def _collect_standup_segments(
     selected: str, since: datetime, until: datetime
 ) -> tuple[list[dict[str, Any]], str | None]:
@@ -424,6 +462,7 @@ async def _collect_standup_segments(
 
     conn = _conn()
     try:
+        _persist_standup_collection(conn, date_.fromisoformat(selected), messages)
         segments = await parse_segments(conn, build_default(), messages, notes=notes)
     finally:
         conn.close()
@@ -461,6 +500,7 @@ async def _persist_manual_standups(
     from tl_agent.models.signals import StandupMessage
     from tl_agent.phases.standup_parse import parse_segments
     from tl_agent.storage import load_team, transaction
+    from tl_agent.storage.repos import collection_state
     from tl_agent.storage.repos import observations as observations_repo
     from tl_agent.storage.repos import standup_segments as segments_repo
 
@@ -506,6 +546,9 @@ async def _persist_manual_standups(
                     summary=None,
                     chat_message_id=msg.chat_message_id,
                 )
+            collection_state.set_standup(
+                conn, run_date, standups_count=len({m.engineer_id for m in messages})
+            )
         segments = await parse_segments(conn, build_default(), messages, notes=notes)
     finally:
         conn.close()
@@ -707,6 +750,50 @@ async def workflow_collect_standup(date: str | None = Form(None)) -> HTMLRespons
             until=until.isoformat(),
             groups=groups,
             chat_err=chat_err,
+        )
+    )
+
+
+@router.get("/workflow/standup_fragment", response_class=HTMLResponse)
+async def workflow_standup_fragment(date: str | None = None) -> HTMLResponse:
+    """Persisted standup segments for the day — rendered on page load, no fetch.
+
+    Mirrors the Jira/GitLab fragments: returning to the Workflow tab rebuilds
+    the parsed-standup panel from `standup_segments` instead of leaving it blank
+    until the next collect. Empty when nothing's been collected for the date.
+    """
+    from tl_agent.storage import load_team
+    from tl_agent.storage.repos import standup_segments as segments_repo
+
+    selected = _coerce_date(date)
+    conn = _conn()
+    try:
+        segments = segments_repo.list_for_date(conn, selected)
+    finally:
+        conn.close()
+
+    team = load_team()
+    by_engineer: dict[str, list[Any]] = {}
+    for seg in segments:
+        by_engineer.setdefault(seg.engineer_id, []).append(seg)
+    groups = [
+        {"engineer": e, "segments": by_engineer[e.id]}
+        for e in team.engineers
+        if e.id in by_engineer
+    ]
+    if not groups:
+        # Nothing collected for the day yet — keep the panel empty rather than
+        # show a "0 people / No standup messages" card on every fresh load.
+        return HTMLResponse("")
+
+    template = _env.get_template("_workflow_standup.html")
+    return HTMLResponse(
+        template.render(
+            selected_date=selected,
+            since=None,
+            until=None,
+            groups=groups,
+            chat_err=None,
         )
     )
 

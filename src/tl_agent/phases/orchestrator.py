@@ -119,6 +119,9 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
 
     phase_log: list[dict[str, object]] = []
 
+    signals_summary: dict[str, Any] = {}
+    sprint_decision: dict[str, Any] = {}
+
     def _started(name: str) -> float:
         logger.info("→ %s", name)
         return _time.perf_counter()
@@ -127,9 +130,12 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
         dur = round(_time.perf_counter() - t0, 2)
         logger.info("✓ %s (%.1fs)", name, dur)
         phase_log.append({"phase": name, "status": status, "duration_s": dur})
-
-    signals_summary: dict[str, Any] = {}
-    sprint_decision: dict[str, Any] = {}
+        # Checkpoint after every phase so the live Workflow milestone poll
+        # advances as the run progresses, instead of sitting frozen on
+        # "running" until the whole pipeline finishes. The caller flips to a
+        # terminal status (completed/awaiting_sprint) afterwards.
+        if status != "awaiting":
+            _save_run("in_progress")
 
     def _save_run(status: str) -> None:
         notes_payload = json.dumps(
@@ -140,10 +146,14 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
                 "sprint_decision": sprint_decision,
             }
         )
+        now = datetime.now(UTC).isoformat()
+        # Terminal statuses stamp finished_at; in-flight/parked states leave it
+        # NULL. `awaiting_sprint` is parked-but-resumable, so it's not finished.
+        finished_at = None if status in {"in_progress", "awaiting_sprint"} else now
         ctx.sqlite.execute(
             """
-            INSERT INTO runs (id, run_date, started_at, status, trace_id, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO runs (id, run_date, started_at, finished_at, status, trace_id, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 finished_at = excluded.finished_at,
                 status      = excluded.status,
@@ -152,7 +162,8 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
             (
                 ctx.run_id,
                 ctx.run_date.isoformat(),
-                datetime.now(UTC).isoformat(),
+                now,
+                finished_at,
                 status,
                 getattr(ctx, "trace_id", None),
                 notes_payload,
@@ -219,6 +230,9 @@ async def _run_pipeline(ctx: RunContext) -> RunResult:
             "tickets_added_since_yesterday": len(signals.tickets_added_since_yesterday),
         }
     )
+    # Re-checkpoint so the milestone counts (tickets/commits/standups) show up
+    # immediately, not a phase late — _done above persisted before this update.
+    _save_run("in_progress")
 
     # Persist today's standup observations so the sprint UI can display them
     # without requiring the full 8-phase pipeline to complete first.

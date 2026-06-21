@@ -96,3 +96,37 @@ def set_llm_attrs(
         span.set_attribute("tl_agent.cache_hit", cache_hit)
     if latency_ms is not None:
         span.set_attribute("tl_agent.latency_ms", latency_ms)
+
+
+def set_llm_outcome(
+    outcome: str,
+    *,
+    attempt: int | None = None,
+    detail: str | None = None,
+    preview: str | None = None,
+) -> None:
+    """Record how an LLM call's payload was resolved on the *current* span.
+
+    `outcome` is one of `ok`, `empty`, `invalid_json`, `validation_error`.
+    Anything other than `ok` adds an `llm.parse_failed` event and flips the
+    span to ERROR, so a structured-output failure is visible in Phoenix even
+    though the underlying HTTP call returned 200.
+
+    Call this from inside `with llm_span(...)`.
+    """
+    span = trace.get_current_span()
+    span.set_attribute("tl_agent.llm.outcome", outcome)
+    if attempt is not None:
+        span.set_attribute("tl_agent.llm.attempt", attempt)
+    if detail:
+        span.set_attribute("tl_agent.llm.outcome_detail", detail)
+    if preview is not None:
+        span.set_attribute("tl_agent.llm.content_preview", preview)
+    if outcome != "ok":
+        event_attrs: dict[str, Any] = {"outcome": outcome}
+        if detail:
+            event_attrs["detail"] = detail
+        if preview is not None:
+            event_attrs["preview"] = preview
+        span.add_event("llm.parse_failed", event_attrs)
+        span.set_status(Status(StatusCode.ERROR, f"{outcome}: {detail or ''}".strip()))

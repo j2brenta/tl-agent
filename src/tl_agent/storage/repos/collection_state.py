@@ -22,11 +22,13 @@ class CollectionState:
     run_date: str
     jira_collected_at: str | None
     gitlab_collected_at: str | None
+    standup_collected_at: str | None
     sprint_id: str | None
     sprint_day: int | None
     sprint_length: int | None
     tickets_count: int | None
     commits_count: int | None
+    standups_count: int | None
     manifest: CollectionManifest | None
 
 
@@ -95,6 +97,29 @@ def set_gitlab(
     )
 
 
+def set_standup(
+    conn: sqlite3.Connection,
+    run_date: date,
+    *,
+    standups_count: int,
+) -> None:
+    run_date_iso = run_date.isoformat()
+    _ensure_row(conn, run_date_iso)
+    conn.execute(
+        """
+        UPDATE collection_state SET
+            standup_collected_at = ?,
+            standups_count       = ?
+        WHERE run_date = ?
+        """,
+        (
+            datetime.now(UTC).isoformat(),
+            standups_count,
+            run_date_iso,
+        ),
+    )
+
+
 def get(conn: sqlite3.Connection, run_date: date) -> CollectionState | None:
     row = conn.execute(
         "SELECT * FROM collection_state WHERE run_date = ?",
@@ -111,10 +136,12 @@ def get(conn: sqlite3.Connection, run_date: date) -> CollectionState | None:
         run_date=row["run_date"],
         jira_collected_at=row["jira_collected_at"],
         gitlab_collected_at=row["gitlab_collected_at"],
+        standup_collected_at=row["standup_collected_at"],
         sprint_id=row["sprint_id"],
         sprint_day=row["sprint_day"],
         sprint_length=row["sprint_length"],
         tickets_count=row["tickets_count"],
         commits_count=row["commits_count"],
+        standups_count=row["standups_count"],
         manifest=manifest,
     )

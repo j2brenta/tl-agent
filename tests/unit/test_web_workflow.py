@@ -8,6 +8,7 @@ monkeypatched so tests stay deterministic (no network, no event-loop juggling).
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -255,6 +256,91 @@ def test_collect_window_is_yesterday_noon_to_today_noon() -> None:
     assert since == datetime(2026, 5, 21, 12, 0, tzinfo=UTC)
 
 
+# -------------------- orphan-run recovery --------------------
+
+
+def test_recover_orphaned_runs_only_touches_in_progress(tmp_path: Path) -> None:
+    from tl_agent.web.app import _recover_orphaned_runs
+
+    db = str(tmp_path / "wf.db")
+    setup = connect(Path(db))
+    initialize(setup)
+    setup.close()
+    _insert_run(db, "run-live", "in_progress", {"phases": [], "signals": {}})
+    _insert_run(db, "run-await", "awaiting_sprint", {"phases": [], "signals": {}})
+    _insert_run(db, "run-done", "completed", {"phases": [], "signals": {}})
+
+    conn = connect(Path(db))
+    try:
+        _recover_orphaned_runs(conn)
+        rows = {
+            r["id"]: (r["status"], r["finished_at"])
+            for r in conn.execute("SELECT id, status, finished_at FROM runs")
+        }
+    finally:
+        conn.close()
+
+    assert rows["run-live"][0] == "interrupted"
+    assert rows["run-live"][1] is not None  # finished_at stamped
+    assert rows["run-await"][0] == "awaiting_sprint"  # parked-but-resumable, untouched
+    assert rows["run-done"][0] == "completed"
+
+
+def test_run_trigger_schedules_after_orphan_recovered(client: TestClient, tmp_path: Path) -> None:
+    """An interrupted (recovered) run no longer blocks a fresh run for the date."""
+    from tl_agent.web.app import _recover_orphaned_runs
+
+    db = str(tmp_path / "wf.db")
+    _insert_run(db, "run-live", "in_progress", {"phases": [], "signals": {}})
+    conn = connect(Path(db))
+    try:
+        _recover_orphaned_runs(conn)
+    finally:
+        conn.close()
+
+    r = client.post("/workflow/run", data={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert client.scheduled == [("2026-05-22", None, False)]  # type: ignore[attr-defined]
+
+
+# -------------------- standup page-load fragment --------------------
+
+
+def test_standup_fragment_empty_when_nothing_collected(client: TestClient) -> None:
+    r = client.get("/workflow/standup_fragment?date=2026-05-22")
+    assert r.status_code == 200
+    assert r.text.strip() == ""
+
+
+def test_standup_fragment_renders_persisted_segments(client: TestClient, tmp_path: Path) -> None:
+    from tl_agent.storage.repos import standup_segments as segments_repo
+
+    conn = connect(tmp_path / "wf.db")
+    try:
+        segments_repo.upsert_many(
+            conn,
+            [
+                StandupSegment(
+                    engineer_id="alicia",
+                    date_iso="2026-05-22",
+                    chat_message_id="manual:2026-05-22:alicia",
+                    chat_channel_id="manual_form",
+                    segment_index=0,
+                    text="Shipped the auth refactor",
+                    kind=StandupSegmentKind.UPDATE,
+                )
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client.get("/workflow/standup_fragment?date=2026-05-22")
+    assert r.status_code == 200
+    assert "Shipped the auth refactor" in r.text
+    assert "Standup" in r.text
+
+
 def test_ticket_rows_flag_missing_and_unknown() -> None:
     rows = _ticket_rows(
         [_ticket("ENG-1", "john"), _ticket("ENG-2", None), _ticket("ENG-3", "ghost")]
@@ -363,6 +449,27 @@ def test_run_prompt_reflects_cache_state(
     r2 = client.get("/workflow/run_prompt?date=2026-05-22")
     assert "Reuse stored" in r2.text
     assert "1" in r2.text  # tickets count
+
+
+def test_run_prompt_reflects_standup_collection(client: TestClient) -> None:
+    from tl_agent.storage import connect, transaction
+    from tl_agent.storage.repos import collection_state
+
+    # Standup not collected yet → the panel says so.
+    r = client.get("/workflow/run_prompt?date=2026-05-22")
+    assert "Standup:" in r.text
+    standup_line = r.text.split("Standup:")[1]
+    assert "not collected" in standup_line.split("</li>")[0]
+
+    conn = connect(Path(os.environ["TLA_SQLITE_PATH"]))
+    with transaction(conn):
+        collection_state.set_standup(conn, date(2026, 5, 22), standups_count=3)
+    conn.close()
+
+    r2 = client.get("/workflow/run_prompt?date=2026-05-22")
+    standup_line2 = r2.text.split("Standup:")[1].split("</li>")[0]
+    assert "3" in standup_line2 and "people" in standup_line2
+    assert "collected" in standup_line2
 
 
 # -------------------- standup collect + parse --------------------

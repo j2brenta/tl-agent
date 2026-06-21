@@ -36,21 +36,21 @@ routes:
 
   phase2_triage:
     provider: ollama
-    model: qwen3:8b
+    model: llama3.1:8b
     max_tokens: 512
     temperature: 0.0
     cache_system: false
 
   standup_segments:
     provider: ollama
-    model: qwen3:8b
+    model: llama3.1:8b
     max_tokens: 512
     temperature: 0.0
     cache_system: false
 
   phase3_correlate:
     provider: ollama
-    model: qwen3:8b
+    model: llama3.1:8b
     max_tokens: 2048
     temperature: 0.0
     cache_system: false

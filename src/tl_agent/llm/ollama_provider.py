@@ -35,7 +35,7 @@ from tl_agent.llm.base import (
     TokenUsage,
     ToolUseBlock,
 )
-from tl_agent.obs.spans import llm_span, set_llm_attrs
+from tl_agent.obs.spans import llm_span, set_llm_attrs, set_llm_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,7 @@ class OllamaProvider(Provider):
             max_tokens=max_tokens,
             temperature=temperature,
             phase=phase,
+            attempt=1,
         )
         if first_value is not None:
             return first_value, usage
@@ -156,6 +157,7 @@ class OllamaProvider(Provider):
             max_tokens=max_tokens,
             temperature=temperature,
             phase=phase,
+            attempt=2,
         )
         merged = TokenUsage(
             input_tokens=usage.input_tokens + retry_usage.input_tokens,
@@ -166,7 +168,8 @@ class OllamaProvider(Provider):
         )
         if retry_value is None:
             raise ProviderError(
-                f"structured validation failed after retry: schema={schema.__name__}"
+                f"structured validation failed after retry: schema={schema.__name__} "
+                f"phase={phase} model={model} (see llm.parse_failed span events for detail)"
             )
         return retry_value, merged
 
@@ -180,6 +183,7 @@ class OllamaProvider(Provider):
         max_tokens: int,
         temperature: float,
         phase: str | None,
+        attempt: int,
     ) -> tuple[T | None, TokenUsage]:
         """One call against `/api/chat`; returns None on empty/invalid output."""
         payload: dict[str, Any] = {
@@ -218,23 +222,41 @@ class OllamaProvider(Provider):
                 latency_ms=latency_ms,
             )
 
-        raw_content = cast(
-            str, (cast(dict[str, Any], data.get("message")) or {}).get("content") or ""
-        )
-        content = _strip_thinking(raw_content).strip()
-        if not content:
-            return None, usage
-        try:
-            value = schema.model_validate_json(content)
-        except (json.JSONDecodeError, ValidationError) as exc:
-            logger.warning(
-                "ollama.structured invalid payload schema=%s phase=%s err=%s preview=%r",
-                schema.__name__,
-                phase,
-                type(exc).__name__,
-                content[:200],
+            raw_content = cast(
+                str, (cast(dict[str, Any], data.get("message")) or {}).get("content") or ""
             )
-            return None, usage
+            content = _strip_thinking(raw_content).strip()
+            if not content:
+                # Empty after stripping <think> usually means the model spent its
+                # num_predict budget reasoning without ever emitting JSON.
+                set_llm_outcome(
+                    "empty",
+                    attempt=attempt,
+                    detail="no content after stripping <think> blocks",
+                    preview=raw_content[:200],
+                )
+                return None, usage
+            try:
+                value = schema.model_validate_json(content)
+            except (json.JSONDecodeError, ValidationError) as exc:
+                outcome = (
+                    "invalid_json" if isinstance(exc, json.JSONDecodeError) else "validation_error"
+                )
+                logger.warning(
+                    "ollama.structured invalid payload schema=%s phase=%s err=%s preview=%r",
+                    schema.__name__,
+                    phase,
+                    type(exc).__name__,
+                    content[:200],
+                )
+                set_llm_outcome(
+                    outcome,
+                    attempt=attempt,
+                    detail=f"{type(exc).__name__}: {exc}",
+                    preview=content[:200],
+                )
+                return None, usage
+            set_llm_outcome("ok", attempt=attempt)
         return value, usage
 
     def estimate_tokens(self, text: str) -> int:

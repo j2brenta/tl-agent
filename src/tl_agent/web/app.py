@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import date
@@ -72,6 +73,27 @@ async def _discover_projects_on_startup() -> None:
         conn.close()
 
 
+def _recover_orphaned_runs(conn: sqlite3.Connection) -> None:
+    """Mark dangling `in_progress` runs as interrupted on startup.
+
+    Pipeline runs are fire-and-forget asyncio tasks owned by the web process
+    (`workflow._schedule_run`). When the process dies — a crash, a Ctrl-C, or
+    a uvicorn `--reload` on a code edit — the task is killed but its row stays
+    `in_progress` forever, where it shows as a stuck run *and* blocks new runs
+    for that date via the in-flight guard. Any `in_progress` row at startup is
+    therefore necessarily orphaned: recover it. `awaiting_sprint` is parked but
+    resumable, so it's left alone.
+    """
+    from datetime import UTC, datetime
+
+    cur = conn.execute(
+        "UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'in_progress'",
+        (datetime.now(UTC).isoformat(),),
+    )
+    if cur.rowcount:
+        logger.warning("recovered %d orphaned in_progress run(s) at startup", cur.rowcount)
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Process-wide startup/shutdown — sets up OTel, ensures the schema, and
@@ -95,6 +117,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     conn = connect(db_path)
     try:
         initialize(conn)
+        _recover_orphaned_runs(conn)
     finally:
         conn.close()
 

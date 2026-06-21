@@ -76,9 +76,15 @@ async def parse_segments(
                 phase="standup_segments",
             )
         except Exception as exc:
+            logger.warning(
+                "standup_segments parse failed engineer=%s err=%s",
+                msg.engineer_id,
+                exc,
+                exc_info=True,
+            )
             notes.append(
-                f"standup_segments: parse failed for {msg.engineer_id} ({type(exc).__name__}); "
-                "treated as a single update segment"
+                f"standup_segments: parse failed for {msg.engineer_id} "
+                f"({type(exc).__name__}: {exc}); treated as a single update segment"
             )
             return [
                 StandupSegment(

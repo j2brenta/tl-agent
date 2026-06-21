@@ -44,13 +44,24 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
         isolation_level=None,  # autocommit; transactions managed by `transaction()`
     )
     conn.row_factory = sqlite3.Row
+    # busy_timeout first so the lock-taking statements below get the 5s wait.
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA foreign_keys = ON")
     # WAL by default; the container uses TRUNCATE because WAL's mmap'd `-shm`
     # file is unreliable on a Docker bind mount (see Settings.sqlite_journal_mode).
     journal_mode = "WAL" if target == ":memory:" else get_settings().sqlite_journal_mode
-    conn.execute(f"PRAGMA journal_mode = {journal_mode}")
+    # Changing journal mode takes a brief EXCLUSIVE lock, and SQLite does NOT
+    # invoke the busy handler for it — against a concurrent writer (a background
+    # run's per-phase checkpoints) it returns "database is locked" immediately.
+    # The mode is an optimization, not a correctness requirement: the default
+    # rollback journal (DELETE) is just as bind-mount-safe as TRUNCATE, and a
+    # DB already in WAL no-ops this. So make it best-effort rather than 500 the
+    # request that happened to connect mid-write.
+    try:
+        conn.execute(f"PRAGMA journal_mode = {journal_mode}")
+    except sqlite3.OperationalError:
+        logger.warning("could not set journal_mode=%s (db busy); using default", journal_mode)
     conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -71,6 +82,8 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # (table, column, "type + default" suffix used in ALTER TABLE)
     ("decisions", "run_date", "TEXT NOT NULL DEFAULT ''"),
     ("decisions", "needs_review", "INTEGER NOT NULL DEFAULT 0"),
+    ("collection_state", "standup_collected_at", "TEXT"),
+    ("collection_state", "standups_count", "INTEGER"),
 )
 
 

@@ -16,6 +16,12 @@
           <span style="color:var(--text-faint)">· collected <time datetime="{{ gitlab_collected_at }}">{{ gitlab_collected_at[:16].replace('T',' ') }}</time> UTC</span>
         {% else %}<span style="color:var(--text-muted)">not collected</span>{% endif %}
       </li>
+      <li>Standup:
+        {% if standup_collected_at %}
+          <strong>{{ standups_count }}</strong> {{ "person" if standups_count == 1 else "people" }}
+          <span style="color:var(--text-faint)">· collected <time datetime="{{ standup_collected_at }}">{{ standup_collected_at[:16].replace('T',' ') }}</time> UTC</span>
+        {% else %}<span style="color:var(--text-muted)">not collected</span>{% endif %}
+      </li>
     </ul>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
