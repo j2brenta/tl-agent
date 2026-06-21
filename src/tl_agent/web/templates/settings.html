@@ -1,0 +1,60 @@
+{% extends "_base.html" %}
+{% block title %}Settings{% endblock %}
+{% block nav_settings %}active{% endblock %}
+
+{% macro status_badge(st) -%}
+  {% if st.ok %}
+    <span class="badge badge-green" title="{{ st.url }}">● up · {{ st.detail }}</span>
+  {% else %}
+    <span class="badge badge-amber" title="{{ st.url }}">● down · {{ st.detail }}</span>
+  {% endif %}
+{%- endmacro %}
+
+{% block body %}
+
+<div class="page-header">
+  <h1>Settings <span class="sprint-name">backends &amp; live health</span></h1>
+</div>
+
+{% for w in warnings %}
+<div class="banner banner-warn"><span>⚠</span><span>{{ w }}</span></div>
+{% endfor %}
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+  {% for sec in sections %}
+  <div class="card">
+    <div class="section-label">{{ sec.icon }} {{ sec.title }}</div>
+    <table>
+      <tbody>
+        {% for row in sec.rows %}
+        <tr>
+          <td style="color:var(--text-muted);white-space:nowrap">{{ row.label }}</td>
+          <td style="word-break:break-all"><code>{{ row.value }}</code></td>
+          <td style="text-align:right">{% if row.status %}{{ status_badge(row.status) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-label">Active model routes
+    <span style="color:var(--text-faint);font-weight:400">· which phase runs on which model</span>
+  </div>
+  <table>
+    <thead><tr><th>Phase / route</th><th>Provider</th><th>Model</th></tr></thead>
+    <tbody>
+      {% for r in router_routes %}
+      <tr>
+        <td><code>{{ r.phase }}</code></td>
+        <td>{% if r.provider == 'ollama' %}<span class="badge badge-blue">{{ r.provider }}</span>{% else %}{{ r.provider }}{% endif %}</td>
+        <td style="color:var(--text-muted)"><code>{{ r.model }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

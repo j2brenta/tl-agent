@@ -239,6 +239,50 @@ def test_standup_segments_upsert_updates_in_place(db: sqlite3.Connection) -> Non
     assert got == [updated]
 
 
+def test_standup_segments_delete_for_message_busts_cache(db: sqlite3.Connection) -> None:
+    # An edited manual resubmission reuses the deterministic chat_message_id;
+    # delete_for_message clears the cache so the next parse re-segments rather
+    # than returning the stale (and now wrong-length) cached result.
+    msg_id = "manual:2026-05-22:karen"
+    first = [
+        StandupSegment(
+            engineer_id="karen",
+            date_iso="2026-05-22",
+            chat_message_id=msg_id,
+            chat_channel_id="manual_form",
+            segment_index=i,
+            text=text,
+            kind=StandupSegmentKind.UPDATE,
+        )
+        for i, text in enumerate(["one", "two"])
+    ]
+    with transaction(db):
+        standup_segments.upsert_many(db, first)
+    assert (
+        len(standup_segments.get_for_message(db, chat_message_id=msg_id, engineer_id="karen")) == 2
+    )
+
+    with transaction(db):
+        standup_segments.delete_for_message(db, chat_message_id=msg_id, engineer_id="karen")
+    assert standup_segments.get_for_message(db, chat_message_id=msg_id, engineer_id="karen") == []
+
+    rewritten = [
+        StandupSegment(
+            engineer_id="karen",
+            date_iso="2026-05-22",
+            chat_message_id=msg_id,
+            chat_channel_id="manual_form",
+            segment_index=0,
+            text="just one now",
+            kind=StandupSegmentKind.UPDATE,
+        )
+    ]
+    with transaction(db):
+        standup_segments.upsert_many(db, rewritten)
+    got = standup_segments.get_for_message(db, chat_message_id=msg_id, engineer_id="karen")
+    assert [s.text for s in got] == ["just one now"]
+
+
 def test_standup_segments_list_for_engineer_date(db: sqlite3.Connection) -> None:
     segs = [
         StandupSegment(

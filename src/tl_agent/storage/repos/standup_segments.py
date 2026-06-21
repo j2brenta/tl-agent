@@ -60,6 +60,19 @@ def get_for_message(
     return [_row_to_segment(r) for r in rows]
 
 
+def delete_for_message(conn: sqlite3.Connection, *, chat_message_id: str, engineer_id: str) -> None:
+    """Drop a message's cached segments so the next parse re-runs.
+
+    The manual-entry path reuses a deterministic `chat_message_id`
+    (`manual:{date}:{engineer_id}`); deleting before re-parse means an edited
+    resubmission re-segments instead of returning the stale cached result.
+    """
+    conn.execute(
+        "DELETE FROM standup_segments WHERE chat_message_id = ? AND engineer_id = ?",
+        (chat_message_id, engineer_id),
+    )
+
+
 def list_for_engineer_date(
     conn: sqlite3.Connection, *, engineer_id: str, date_iso: str
 ) -> list[StandupSegment]:

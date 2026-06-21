@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     prompts_dir: Path = REPO_ROOT / "prompts"
     traces_dir: Path = REPO_ROOT / "traces"
     sqlite_path: Path = REPO_ROOT / "data" / "tl_agent.db"
+    # WAL is ideal for local dev, but its shared-memory (`-shm`) file is
+    # memory-mapped, which Docker Desktop's bind-mount file sharing doesn't
+    # support — a DB on a bind mount then reports "disk image is malformed".
+    # The container overrides this to TRUNCATE (see infra/agent.defaults.env).
+    sqlite_journal_mode: Literal["WAL", "TRUNCATE", "DELETE"] = "WAL"
 
     # llm
     anthropic_api_key: str = Field(default="", description="Anthropic API key")

@@ -236,6 +236,7 @@ FastAPI + HTMX. Phase 8 is a 4-button surface — a React app would be overkill
 and would hide the markup. Templates are in `src/tl_agent/web/templates/`,
 loaded via Jinja2, swapped inline via HTMX.
 
+
 The nav is grouped into **Workflow** (Workflow, Sprint, Brief, Decisions,
 Gitlab) and **Config** (Team). A global, cookie-backed **run-day** selector in
 the sidebar makes every tab stick to the same day, and lets you run for past
@@ -331,10 +332,10 @@ Admin user is root. Default password is set on container creation for 24 hours. 
 docker exec tla-gitlab gitlab-rails runner "u = User.find_by_username('root'); u.password = 'tla-dev-pass123'; u.password_confirmation = 'tla-dev-pass123'; u.save!"
 ```
 
-## Seed
+## Seed commits for Gitlab
 Seed for today
 ```
-COMMIT_ANCHOR_DATE=2026-06-14 bash infra/gitlab/seed.sh
+bash infra/gitlab/seed.sh
 ```
 
 ---

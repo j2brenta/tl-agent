@@ -421,3 +421,72 @@ def test_collect_standup_route_shows_chat_error(
     r = client.post("/workflow/collect_standup", data={"date": "2026-05-22"})
     assert r.status_code == 200
     assert "channel not found" in r.text
+
+
+def test_standup_sources_picker_lists_form_and_mattermost(client: TestClient) -> None:
+    r = client.get("/workflow/standup_sources", params={"date": "2026-05-22"})
+    assert r.status_code == 200
+    assert "manual form" in r.text.lower()
+    assert "/workflow/standup_form" in r.text
+    assert "/workflow/collect_standup" in r.text
+    # Future sources are shown as disabled placeholders.
+    assert "soon" in r.text.lower()
+
+
+def test_standup_form_is_a_single_transcript_box(client: TestClient) -> None:
+    r = client.get("/workflow/standup_form", params={"date": "2026-05-22"})
+    assert r.status_code == 200
+    # One shared box for the whole team, not a field per engineer.
+    assert 'name="transcript"' in r.text
+    assert 'name="standup_john"' not in r.text
+    assert "/workflow/collect_standup_form" in r.text
+
+
+def test_collect_standup_form_route_attributes_and_groups(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    john = Engineer(id="john", display_name="John Doe")
+    captured: dict[str, object] = {}
+
+    async def _fake_persist(
+        selected: str, raw_by_engineer: dict[str, str]
+    ) -> tuple[list[dict[str, object]], str | None]:
+        captured["selected"] = selected
+        captured["raw"] = raw_by_engineer
+        segments = [
+            StandupSegment(
+                engineer_id="john",
+                date_iso=selected,
+                chat_message_id=f"manual:{selected}:john",
+                chat_channel_id="manual_form",
+                segment_index=0,
+                text="Shipped ENG-12.",
+                kind=StandupSegmentKind.UPDATE,
+            )
+        ]
+        return [{"engineer": john, "segments": segments}], None
+
+    monkeypatch.setattr(wf, "_persist_manual_standups", _fake_persist)
+
+    r = client.post(
+        "/workflow/collect_standup_form",
+        data={"date": "2026-05-22", "transcript": "John: Shipped ENG-12.\nMatt: on auth"},
+    )
+    assert r.status_code == 200
+    assert "John Doe" in r.text
+    assert "Shipped ENG-12." in r.text
+    assert captured["selected"] == "2026-05-22"
+    raw = captured["raw"]
+    assert isinstance(raw, dict)
+    # The pasted blob is attributed to engineers before the funnel sees it.
+    assert raw["john"] == "Shipped ENG-12."
+    assert raw["matt"] == "on auth"
+
+
+def test_collect_standup_form_route_unattributed_blob_warns(client: TestClient) -> None:
+    r = client.post(
+        "/workflow/collect_standup_form",
+        data={"date": "2026-05-22", "transcript": "no names here, just rambling"},
+    )
+    assert r.status_code == 200
+    assert "attribute any lines to a team member" in r.text

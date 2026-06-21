@@ -45,7 +45,10 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    # WAL by default; the container uses TRUNCATE because WAL's mmap'd `-shm`
+    # file is unreliable on a Docker bind mount (see Settings.sqlite_journal_mode).
+    journal_mode = "WAL" if target == ":memory:" else get_settings().sqlite_journal_mode
+    conn.execute(f"PRAGMA journal_mode = {journal_mode}")
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn

@@ -1,0 +1,31 @@
+{# Modal body: paste the whole team's standup in one box. Lines are attributed
+   to engineers by `Name:` headers (standup_intake.attribute_pasted_standups).
+   Loaded into the static #standup-modal dialog in workflow.html. #}
+<div class="modal-card">
+  <div class="section-label">Enter standup — paste the team's updates</div>
+  <form hx-post="/workflow/collect_standup_form" hx-target="#workflow-standup"
+        hx-swap="innerHTML" hx-indicator="#standup-spin"
+        hx-on::after-request="if(event.detail.successful){document.getElementById('standup-modal').close()}">
+    <div style="display:flex;align-items:center;gap:8px;margin:8px 0 12px">
+      <label for="standup-date" style="font-size:13px;color:var(--text-muted)">Date</label>
+      <input type="date" id="standup-date" name="date" value="{{ selected_date }}"
+             style="font-size:13px;padding:4px 6px">
+    </div>
+
+    <textarea name="transcript" rows="12" autofocus
+              placeholder="Start each person's section with their name, e.g.&#10;&#10;John: shipped ENG-12, no blockers&#10;Matt: still on the auth refresh&#10;Alicia: reviewing MRs today&#10;Karen: out sick"
+              style="width:100%;font-size:12px;line-height:1.6;padding:8px;
+                     border-radius:var(--radius-sm);border:1px solid var(--border);
+                     background:var(--bg);resize:vertical"></textarea>
+    <div style="font-size:11px;color:var(--text-faint);margin-top:6px">
+      Names are matched to the team ({{ engineer_names }}). Lines that don't start
+      with a recognised name join the section above them.
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
+      <button type="submit" class="btn-import">✎ Save &amp; parse</button>
+      <button type="button" style="font-size:12px"
+              onclick="document.getElementById('standup-modal').close()">Cancel</button>
+    </div>
+  </form>
+</div>

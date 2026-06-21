@@ -6,16 +6,18 @@
     <span style="color:var(--text-faint);font-weight:400">
       · {{ groups | length }} {{ "person" if groups | length == 1 else "people" }}
     </span>
+    {% if since and until %}
     <span style="color:var(--text-faint);font-weight:400;font-size:11px">
       (<time datetime="{{ since }}">{{ since[:16].replace('T',' ') }}</time> →
        <time datetime="{{ until }}">{{ until[:16].replace('T',' ') }}</time> UTC)
     </span>
+    {% endif %}
   </div>
 
   {% if chat_err %}
-  <div class="banner banner-warn"><span>⚠</span><span>Mattermost fetch failed: {{ chat_err }}</span></div>
+  <div class="banner banner-warn"><span>⚠</span><span>Standup collection failed: {{ chat_err }}</span></div>
   {% elif not groups %}
-  <div style="font-size:13px;color:var(--text-muted)">No standup messages in this window.</div>
+  <div style="font-size:13px;color:var(--text-muted)">No standup messages.</div>
   {% else %}
   <div style="display:flex;flex-direction:column;gap:14px">
     {% for group in groups %}

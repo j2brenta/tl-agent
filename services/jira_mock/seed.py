@@ -6,19 +6,37 @@ first boot). Writes `fixtures/state.json` with:
   - A few status-history entries (so get_ticket_history returns real shape)
   - Dependency links (ENG-12 blocked_by ENG-9; ENG-19 blocked_by ENG-12)
 
-Why deterministic: evals depend on the same starting state every run.
+Why deterministic: evals depend on the same starting state every run, so the
+default anchor is fixed (2026-05-22). For a live demo, set
+`JIRA_ANCHOR_DATE=YYYY-MM-DD` to move the active sprint near a chosen run day
+(the GitLab `COMMIT_ANCHOR_DATE` analogue) — the sprint then starts 3 days
+before the anchor, mirroring the default day-3 position so a workflow run for
+that date sees a genuinely active sprint. After re-seeding, restart the mock
+(it reads `state.json` on startup):
+    JIRA_ANCHOR_DATE=2026-06-21 uv run python -m services.jira_mock.seed
+    docker compose restart jira_mock
 """
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
-# Anchor today to a fixed date so eval scenarios reproduce.
-RUN_DATE = datetime(2026, 5, 22, 9, 0, tzinfo=UTC)
-SPRINT_START = datetime(2026, 5, 19, 9, 0, tzinfo=UTC)
+# Default eval-stable anchor; override with JIRA_ANCHOR_DATE for a live demo.
+_DEFAULT_RUN_DATE = date(2026, 5, 22)
+
+
+def _anchors() -> tuple[datetime, datetime]:
+    """Return (RUN_DATE, SPRINT_START), shifted to JIRA_ANCHOR_DATE if set."""
+    anchor = os.environ.get("JIRA_ANCHOR_DATE")
+    run_day = date.fromisoformat(anchor) if anchor else _DEFAULT_RUN_DATE
+    run_date = datetime.combine(run_day, time(9, 0), tzinfo=UTC)
+    return run_date, run_date - timedelta(days=3)
+
+
+RUN_DATE, SPRINT_START = _anchors()
 
 BOARD_ID = "ENG"
 SPRINT_ID = "S-2026-05"

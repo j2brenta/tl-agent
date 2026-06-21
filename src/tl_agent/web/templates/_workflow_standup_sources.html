@@ -1,0 +1,31 @@
+{# Standup source picker — opened by the toolbar "Collect Standup" button.
+   Scales to N sources without crowding the toolbar; new agents slot in as
+   rows here. #}
+<div class="card" style="border-color:var(--blue)">
+  <div class="section-label">Collect standup · {{ selected_date }}</div>
+  <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Where from?</div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+
+    <button class="btn-import" style="text-align:left"
+            hx-get="/workflow/standup_form?date={{ selected_date }}"
+            hx-target="#standup-modal-body" hx-swap="innerHTML"
+            onclick="document.getElementById('standup-modal').showModal()">
+      ✎ Paste / type — manual form
+    </button>
+
+    <form hx-post="/workflow/collect_standup" hx-target="#workflow-standup"
+          hx-swap="innerHTML" hx-indicator="#standup-spin">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <button type="submit" class="btn-import" style="text-align:left;width:100%">
+        ⤓ From Mattermost
+      </button>
+    </form>
+
+    <button class="btn-import" style="text-align:left;opacity:.5;cursor:not-allowed" disabled>
+      💬 Messenger paste <span style="color:var(--text-faint);font-weight:400">· soon</span>
+    </button>
+    <button class="btn-import" style="text-align:left;opacity:.5;cursor:not-allowed" disabled>
+      🎙 Meeting recording <span style="color:var(--text-faint);font-weight:400">· soon</span>
+    </button>
+  </div>
+</div>

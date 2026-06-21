@@ -6,11 +6,38 @@
 <script>
   window.TL_AVAILABLE_DATES = {{ available_dates | tojson }};
   window.TL_SELECTED_DATE   = {{ (selected_date or "") | tojson }};
+
+  // Dismiss the standup source dropdown on any click outside it (the toggle
+  // button reopens it; clicking an option lets it close once the action fires).
+  document.addEventListener("click", (e) => {
+    const dd = document.getElementById("standup-sources");
+    if (!dd || !dd.innerHTML.trim()) return;
+    if (e.target.closest("[data-standup-toggle]")) return;
+    if (dd.contains(e.target)) {
+      // An option was picked — close after htmx has issued its request.
+      setTimeout(() => { dd.innerHTML = ""; }, 0);
+      return;
+    }
+    dd.innerHTML = "";
+  });
 </script>
 <style>
   /* htmx toggles `htmx-request` on the hx-indicator target during the fetch. */
   #jira-spin, #gitlab-spin, #standup-spin { display: none; }
   #jira-spin.htmx-request, #gitlab-spin.htmx-request, #standup-spin.htmx-request { display: block; }
+
+  #standup-modal {
+    /* margin:auto restores the centering the global `* { margin:0 }` reset
+       strips from an open modal dialog. */
+    margin: auto;
+    border: none; border-radius: var(--radius); padding: 0;
+    box-shadow: var(--shadow); width: 640px; max-width: 92vw; background: var(--surface);
+  }
+  #standup-modal::backdrop { background: rgba(15, 23, 42, .45); }
+  #standup-modal .modal-card { padding: 18px 20px; }
+
+  /* Source picker drops down directly under the Collect Standup button. */
+  #standup-sources { position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; width: 280px; }
 </style>
 {% endblock %}
 
@@ -28,11 +55,12 @@
       <input type="hidden" name="date" value="{{ selected_date }}">
       <button type="submit" class="btn-import">⎇ Collect GitLab</button>
     </form>
-    <form hx-post="/workflow/collect_standup" hx-target="#workflow-standup" hx-swap="innerHTML"
-          hx-indicator="#standup-spin">
-      <input type="hidden" name="date" value="{{ selected_date }}">
-      <button type="submit" class="btn-import">✎ Collect Standup</button>
-    </form>
+    <div style="position:relative">
+      <button class="btn-import" data-standup-toggle
+              hx-get="/workflow/standup_sources?date={{ selected_date }}"
+              hx-target="#standup-sources" hx-swap="innerHTML">✎ Collect Standup</button>
+      <div id="standup-sources"></div>
+    </div>
     <button class="btn-import"
             hx-get="/workflow/run_prompt?date={{ selected_date }}"
             hx-target="#workflow-runzone" hx-swap="outerHTML">▶ Run now</button>
@@ -59,6 +87,8 @@
   Fetching + parsing standup…
 </div>
 <div id="workflow-standup" style="margin-bottom:16px"></div>
+
+<dialog id="standup-modal"><div id="standup-modal-body"></div></dialog>
 
 <div id="workflow-content"
      hx-get="/workflow/fragment?date={{ selected_date }}"

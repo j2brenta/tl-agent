@@ -13,6 +13,9 @@ Routes:
   GET  /workflow/gitlab_fragment  — cached GitLab commits for the day (page load)
   POST /workflow/collect_gitlab   — refresh GitLab commits from the service + persist
   POST /workflow/collect_standup  — fetch + segment today's standup (cached)
+  GET  /workflow/standup_sources  — pick the standup source (form / Mattermost)
+  GET  /workflow/standup_form     — manual standup entry (modal body, one box)
+  POST /workflow/collect_standup_form — attribute + persist + segment a pasted standup
 
 The milestone view is a friendly projection of the `runs` table
 (`notes.phases` + `notes.signals` + `notes.sprint_decision`) — the same data the
@@ -437,6 +440,88 @@ async def _collect_standup_segments(
     return groups, "; ".join(notes) or None
 
 
+async def _persist_manual_standups(
+    selected: str, raw_by_engineer: dict[str, str]
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Persist manually entered standups, then segment + group them.
+
+    The shared funnel for any non-Mattermost source (the form today; the
+    messenger-paste and meeting-recording agents later): given canonical
+    `engineer_id -> raw text`, it persists raw observations (FTS + the pipeline
+    reuse path) *and* classified segments (Sprint view), so a later "Run now →
+    reuse" sees these standups identically to Mattermost-collected ones.
+
+    Each entry uses a deterministic `chat_message_id` (`manual:{date}:{eng}`);
+    cached segments are dropped first so an edited resubmission re-segments
+    instead of returning the stale cached result.
+    """
+    from datetime import date as _date
+
+    from tl_agent.llm.router import build_default
+    from tl_agent.models.signals import StandupMessage
+    from tl_agent.phases.standup_parse import parse_segments
+    from tl_agent.storage import load_team, transaction
+    from tl_agent.storage.repos import observations as observations_repo
+    from tl_agent.storage.repos import standup_segments as segments_repo
+
+    team = load_team()
+    run_date = _date.fromisoformat(selected)
+
+    messages: list[StandupMessage] = []
+    for engineer in team.engineers:
+        raw = (raw_by_engineer.get(engineer.id) or "").strip()
+        if not raw:
+            continue
+        messages.append(
+            StandupMessage(
+                engineer_id=engineer.id,
+                date_iso=selected,
+                raw=raw,
+                chat_message_id=f"manual:{selected}:{engineer.id}",
+                chat_channel_id="manual_form",
+            )
+        )
+
+    if not messages:
+        return [], None
+
+    notes: list[str] = []
+    conn = _conn()
+    try:
+        # Persist raw + bust stale segment cache first (one transaction, no
+        # network); then segment, which manages its own writes like the
+        # Mattermost path and re-runs the LLM because the cache was cleared.
+        with transaction(conn):
+            for msg in messages:
+                assert msg.chat_message_id is not None
+                segments_repo.delete_for_message(
+                    conn, chat_message_id=msg.chat_message_id, engineer_id=msg.engineer_id
+                )
+                observations_repo.upsert(
+                    conn,
+                    obs_id=f"{selected}:{msg.engineer_id}",
+                    run_date=run_date,
+                    engineer_id=msg.engineer_id,
+                    raw=msg.raw,
+                    summary=None,
+                    chat_message_id=msg.chat_message_id,
+                )
+        segments = await parse_segments(conn, build_default(), messages, notes=notes)
+    finally:
+        conn.close()
+
+    by_engineer: dict[str, list[Any]] = {}
+    for seg in segments:
+        by_engineer.setdefault(seg.engineer_id, []).append(seg)
+
+    groups = [
+        {"engineer": e, "segments": by_engineer[e.id]}
+        for e in team.engineers
+        if e.id in by_engineer
+    ]
+    return groups, "; ".join(notes) or None
+
+
 def _ticket_rows(tickets: list[JiraTicket]) -> list[dict[str, Any]]:
     """Annotate each ticket with assignment health for the table.
 
@@ -622,5 +707,61 @@ async def workflow_collect_standup(date: str | None = Form(None)) -> HTMLRespons
             until=until.isoformat(),
             groups=groups,
             chat_err=chat_err,
+        )
+    )
+
+
+@router.get("/workflow/standup_sources", response_class=HTMLResponse)
+async def workflow_standup_sources(date: str | None = None) -> HTMLResponse:
+    """Pick where today's standup comes from — form, Mattermost, or (soon)
+    the messenger-paste / meeting-recording agents."""
+    selected = _coerce_date(date)
+    template = _env.get_template("_workflow_standup_sources.html")
+    return HTMLResponse(template.render(selected_date=selected))
+
+
+@router.get("/workflow/standup_form", response_class=HTMLResponse)
+async def workflow_standup_form(date: str | None = None) -> HTMLResponse:
+    """The manual standup entry form (modal body): one box for the whole team."""
+    from tl_agent.storage import load_team
+
+    selected = _coerce_date(date)
+    engineer_names = ", ".join(e.display_name for e in load_team().engineers)
+    template = _env.get_template("_workflow_standup_form.html")
+    return HTMLResponse(template.render(selected_date=selected, engineer_names=engineer_names))
+
+
+@router.post("/workflow/collect_standup_form", response_class=HTMLResponse)
+async def workflow_collect_standup_form(
+    date: str | None = Form(None), transcript: str = Form("")
+) -> HTMLResponse:
+    """Persist a pasted team standup, then segment + classify it.
+
+    `transcript` is one blob for the whole team; `Name:` headers attribute each
+    section to an engineer (`standup_intake.attribute_pasted_standups`). Feeds
+    the same downstream as the Mattermost button, so a later "Run now → reuse"
+    consumes these at zero extra LLM cost.
+    """
+    from tl_agent.phases.standup_intake import attribute_pasted_standups
+    from tl_agent.storage import load_team
+
+    selected = _coerce_date(date)
+    raw_by_engineer = attribute_pasted_standups(transcript, load_team().engineers)
+    groups, err = await _persist_manual_standups(selected, raw_by_engineer)
+
+    if not groups and err is None and transcript.strip():
+        err = (
+            "Couldn't attribute any lines to a team member — start each person's "
+            "section with their name, e.g. `John:`"
+        )
+
+    template = _env.get_template("_workflow_standup.html")
+    return HTMLResponse(
+        template.render(
+            selected_date=selected,
+            since=None,
+            until=None,
+            groups=groups,
+            chat_err=err,
         )
     )
