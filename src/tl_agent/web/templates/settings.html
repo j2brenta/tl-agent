@@ -2,13 +2,25 @@
 {% block title %}Settings{% endblock %}
 {% block nav_settings %}active{% endblock %}
 
-{% macro status_badge(st) -%}
-  {% if st.ok %}
-    <span class="badge badge-green" title="{{ st.url }}">● up · {{ st.detail }}</span>
-  {% else %}
-    <span class="badge badge-amber" title="{{ st.url }}">● down · {{ st.detail }}</span>
-  {% endif %}
-{%- endmacro %}
+{% block page_data %}
+<style>
+  .settings-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:16px; }
+  .kv-row {
+    display:flex; gap:12px; align-items:baseline;
+    padding:7px 0; border-bottom:1px solid var(--border);
+  }
+  .kv-row:last-child { border-bottom:none; }
+  .kv-label { flex:0 0 120px; color:var(--text-muted); font-size:13px; }
+  /* min-width:0 lets the value shrink inside the flex row so long URLs wrap
+     at any point, while normal words stay intact (no char-by-char break). */
+  .kv-val {
+    flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap;
+    gap:6px 8px; align-items:center;
+  }
+  .kv-val code { overflow-wrap:anywhere; font-size:12px; }
+  .kv-val .badge { white-space:nowrap; }
+</style>
+{% endblock %}
 
 {% block body %}
 
@@ -20,21 +32,25 @@
 <div class="banner banner-warn"><span>⚠</span><span>{{ w }}</span></div>
 {% endfor %}
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+<div class="settings-grid">
   {% for sec in sections %}
   <div class="card">
     <div class="section-label">{{ sec.icon }} {{ sec.title }}</div>
-    <table>
-      <tbody>
-        {% for row in sec.rows %}
-        <tr>
-          <td style="color:var(--text-muted);white-space:nowrap">{{ row.label }}</td>
-          <td style="word-break:break-all"><code>{{ row.value }}</code></td>
-          <td style="text-align:right">{% if row.status %}{{ status_badge(row.status) }}{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {% for row in sec.rows %}
+    <div class="kv-row">
+      <div class="kv-label">{{ row.label }}</div>
+      <div class="kv-val">
+        <code>{{ row.value }}</code>
+        {% if row.status %}
+          {% if row.status.ok %}
+          <span class="badge badge-green" title="{{ row.status.url }}">● up · {{ row.status.detail }}</span>
+          {% else %}
+          <span class="badge badge-amber" title="{{ row.status.url }}">● down · {{ row.status.detail }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
   </div>
   {% endfor %}
 </div>
