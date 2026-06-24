@@ -8,16 +8,14 @@ Surface (kept small on purpose):
 - get_trace(date)               — returns the JSONL trace for a date
 - list_hotspots(date)           — returns Phase 7 decisions for a date
 
-Run with:  uv run python -m mcp.server
+Run with:  uv run python -m mcp_server.server
 
-NOTE: this module imports the optional `mcp` package; pyright/mypy are
-configured to exclude `mcp/` from strict checking because the package is
-under an extras dep. Run `uv sync --extra mcp` before launching.
+NOTE: this module imports the optional `mcp` SDK, an extras dep. Run
+`uv sync --extra mcp` before launching.
 """
 
 # ruff: noqa
 # type: ignore
-# pyright: ignore
 
 from __future__ import annotations
 
